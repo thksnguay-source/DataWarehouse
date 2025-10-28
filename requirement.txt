@@ -1,0 +1,8 @@
+selenium==4.14.0
+webdriver-manager==4.0.1
+pytest==7.4.2
+black==23.10.0
+pandas==2.1.0
+requests==2.31.0
+sqlalchemy==2.0.21
+pymysql==1.1.1

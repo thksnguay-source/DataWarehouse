@@ -1,0 +1,15 @@
+{
+  "run_id": "a985a319",
+  "timestamp": "2025-10-28T21:50:56.483567",
+  "input_records": 46,
+  "dim_source": 1,
+  "dim_product": 46,
+  "price_history": 46,
+  "output_paths": {
+    "staging": "staging\\normalized_products.csv",
+    "dim_source": "hub\\DIM_Source.csv",
+    "dim_date": "hub\\DIM_Date.csv",
+    "dim_product": "hub\\DIM_Product.csv",
+    "dim_price_history": "hub\\DIM_Price_History.csv"
+  }
+}

@@ -1,0 +1,417 @@
+<mxfile host="app.diagrams.net" modified="2025-10-26T00:00:00.000Z" agent="Claude" version="21.0.0" type="device">
+  <diagram name="Hub-and-Spoke DW Architecture" id="hub-spoke-enhanced">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- TITLE -->
+        <mxCell id="title" value="HUB-AND-SPOKE DATA WAREHOUSE ARCHITECTURE&#xa;E-Commerce Product Analysis System" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="500" y="20" width="800" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- SYSTEM MANAGEMENT & CONTROL (Top Left) -->
+        <mxCell id="mgmt_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;dashed=1;dashPattern=8 8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="280" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mgmt_title" value="System Management &amp;&#xa;Control&#xa;[Script]" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="90" y="150" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mgmt_icon1" value="" style="shape=image;html=1;verticalAlign=top;verticalLabelPosition=bottom;labelBackgroundColor=#ffffff;imageAspect=0;aspect=fixed;image=data:image/svg+xml,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMiI+PHJlY3QgeD0iMiIgeT0iMyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjE0IiByeD0iMiIvPjxwYXRoIGQ9Ik04IDIxaDgiLz48cGF0aCBkPSJNMTIgMTd2NCIvPjwvc3ZnPg==" vertex="1" parent="1">
+          <mxGeometry x="140" y="100" width="50" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mgmt_icon2" value="Script" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="210" y="100" width="60" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- DATA SOURCES (Left) -->
+        <mxCell id="sources_box" value="Data source" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=center;verticalAlign=top;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="120" height="380" as="geometry" />
+        </mxCell>
+
+        <mxCell id="source1_icon" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="65" y="350" width="70" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="source1_label" value="thegioididong.com" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="50" y="430" width="100" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="source2_icon" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="65" y="490" width="70" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="source2_label" value="cellphones.com" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="50" y="570" width="100" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="log_extract_label" value="log extract" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="50" y="640" width="100" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- STAGING AREA -->
+        <mxCell id="staging_box" value="Staging Area" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=center;verticalAlign=top;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="200" y="280" width="640" height="400" as="geometry" />
+        </mxCell>
+
+        <!-- CSV Files -->
+        <mxCell id="csv_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="230" y="320" width="150" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="csv_icon" value="" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#ffe6cc;strokeColor=#d79b00;size=15;" vertex="1" parent="1">
+          <mxGeometry x="245" y="335" width="50" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="csv_tgdd" value="TGDD.csv" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="305" y="345" width="60" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="csv_cell" value="cellphones.csv" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="305" y="370" width="70" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ETL Process Boxes -->
+        <mxCell id="extract_box" value="extract" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="410" y="345" width="70" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="raw_data_box" value="raw data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="510" y="345" width="70" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="transform_box" value="tranform" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="610" y="345" width="70" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="check_box" value="check" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="710" y="345" width="70" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Db Staging -->
+        <mxCell id="db_staging" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="240" y="480" width="100" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="db_staging_label" value="Db Staging" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="240" y="490" width="100" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="db_general" value="General" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="255" y="520" width="70" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="db_transform" value="Transform" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="255" y="550" width="70" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="db_dim" value="Dim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="255" y="580" width="70" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Control DB -->
+        <mxCell id="control_db" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="620" y="500" width="100" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="control_db_label" value="Control DB" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="620" y="510" width="100" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="config_box" value="Config" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="640" y="545" width="60" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- PRESENTATION AREA (HUB) -->
+        <mxCell id="presentation_box" value="Presentation Area" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=center;verticalAlign=top;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="900" y="280" width="540" height="400" as="geometry" />
+        </mxCell>
+
+        <!-- Data Warehouse (Hub) -->
+        <mxCell id="dw_hub" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#cce5ff;strokeColor=#36393d;" vertex="1" parent="1">
+          <mxGeometry x="930" y="320" width="140" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dw_hub_label" value="Data Warehouse&#xa;(HUB)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="930" y="330" width="140" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dw_dim_box" value="Dim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="960" y="385" width="80" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Data Marts (Spokes) -->
+        <mxCell id="mart1" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="320" width="90" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mart1_label" value="Data Mart&#xa;(Price)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1120" y="345" width="90" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mart2" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="420" width="90" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mart2_label" value="Data Mart&#xa;(Product)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1120" y="445" width="90" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mart3" value="" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="930" y="540" width="90" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mart3_label" value="Data Mart&#xa;(Inventory)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="930" y="565" width="90" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- LOG SECTION -->
+        <mxCell id="log_box" value="Log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=center;verticalAlign=top;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="900" y="700" width="150" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="log_icon" value="📊 ETL Logs&#xa;📈 Process Logs&#xa;⚠️ Error Logs" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="910" y="725" width="130" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- SCHEDULE SECTION -->
+        <mxCell id="schedule_box" value="Lập Lịch Chạy&#xa;(Schedule)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=center;verticalAlign=top;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1080" y="700" width="180" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="schedule_content" value="⏰ Daily: 02:00 AM&#xa;📅 Weekly: Sunday&#xa;🔄 Real-time (Optional)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="725" width="160" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- ACCESS TOOLS (Right) -->
+        <mxCell id="access_box" value="Access Tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=center;verticalAlign=top;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1500" y="280" width="160" height="400" as="geometry" />
+        </mxCell>
+
+        <mxCell id="report_icon" value="" style="shape=image;html=1;verticalAlign=top;verticalLabelPosition=bottom;labelBackgroundColor=#ffffff;imageAspect=0;aspect=fixed;image=data:image/svg+xml,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMiI+PHJlY3QgeD0iMiIgeT0iMyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjE0IiByeD0iMiIvPjxwYXRoIGQ9Ik04IDIxaDgiLz48cGF0aCBkPSJNMTIgMTd2NCIvPjwvc3ZnPg==" vertex="1" parent="1">
+          <mxGeometry x="1540" y="330" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="report_label" value="Report" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1530" y="395" width="80" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mining_icon" value="" style="shape=image;html=1;verticalAlign=top;verticalLabelPosition=bottom;labelBackgroundColor=#ffffff;imageAspect=0;aspect=fixed;image=data:image/svg+xml,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMiI+PHJlY3QgeD0iMiIgeT0iMyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjE0IiByeD0iMiIvPjxwYXRoIGQ9Ik04IDIxaDgiLz48cGF0aCBkPSJNMTIgMTd2NCIvPjwvc3ZnPg==" vertex="1" parent="1">
+          <mxGeometry x="1540" y="450" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mining_label" value="Mining" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1530" y="515" width="80" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="viz_icon" value="" style="shape=image;html=1;verticalAlign=top;verticalLabelPosition=bottom;labelBackgroundColor=#ffffff;imageAspect=0;aspect=fixed;image=data:image/svg+xml,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MCIgaGVpZ2h0PSI4MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMiI+PHJlY3QgeD0iMyIgeT0iMyIgd2lkdGg9IjE4IiBoZWlnaHQ9IjE4IiByeD0iMiIvPjxwYXRoIGQ9Ik03IDd2MTAiLz48cGF0aCBkPSJNMTIgN3YxMCIvPjxwYXRoIGQ9Ik0xNyA3djEwIi8+PC9zdmc+" vertex="1" parent="1">
+          <mxGeometry x="1525" y="570" width="90" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ARROWS -->
+        <!-- Sources to CSV -->
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fillColor=#dae8fc;strokeColor=#6c8ebf;endArrow=block;endFill=1;" edge="1" parent="1" source="source1_icon" target="csv_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fillColor=#dae8fc;strokeColor=#6c8ebf;endArrow=block;endFill=1;" edge="1" parent="1" source="source2_icon" target="csv_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CSV to Extract -->
+        <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;endArrow=block;endFill=1;" edge="1" parent="1" source="csv_box" target="extract_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Extract to Raw Data -->
+        <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;endArrow=block;endFill=1;" edge="1" parent="1" source="extract_box" target="raw_data_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Raw Data to Transform -->
+        <mxCell id="arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;endArrow=block;endFill=1;" edge="1" parent="1" source="raw_data_box" target="transform_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Transform to Check -->
+        <mxCell id="arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;endArrow=block;endFill=1;" edge="1" parent="1" source="transform_box" target="check_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Dashed connections to Db Staging -->
+        <mxCell id="arrow7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#666666;dashed=1;dashPattern=5 5;" edge="1" parent="1" source="raw_data_box" target="db_staging">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#666666;dashed=1;dashPattern=5 5;" edge="1" parent="1" source="transform_box" target="db_staging">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#666666;dashed=1;dashPattern=5 5;" edge="1" parent="1" source="check_box" target="db_staging">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Check to DW Hub (load) -->
+        <mxCell id="load_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#82b366;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="check_box" target="dw_hub">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="365" />
+              <mxPoint x="820" y="410" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="load_label" value="load" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="820" y="355" width="40" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- DW Hub to Data Marts -->
+        <mxCell id="arrow10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#9673a6;endArrow=block;endFill=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="dw_hub" target="mart1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#9673a6;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="dw_hub" target="mart2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#9673a6;endArrow=block;endFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="dw_hub" target="mart3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Data Marts to Access Tools -->
+        <mxCell id="arrow13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#b85450;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" parent="1" source="mart1" target="access_box">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1300" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="arrow14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#b85450;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" parent="1" source="mart2" target="access_box">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1300" y="460" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="arrow15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#b85450;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" parent="1" source="mart3" target="access_box">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1300" y="580" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Log Process Connection -->
+        <mxCell id="log_arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#d6b656;dashed=1;dashPattern=5 5;endArrow=block;endFill=1;" edge="1" parent="1" source="staging_box" target="log_box">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="520" y="680" as="sourcePoint" />
+            <mxPoint x="900" y="740" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="log_process_label" value="log process" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="680" y="685" width="70" height="15" as="geometry" />
+        </mxCell>
+
+        <!-- Log Query Connection -->
+        <mxCell id="log_arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#d6b656;dashed=1;dashPattern=5 5;endArrow=block;endFill=0;startArrow=block;startFill=1;" edge="1" parent="1" source="log_box" target="presentation_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="log_query_label" value="log query" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="980" y="685" width="60" height="15" as="geometry" />
+        </mxCell>
+
+        <!-- Schedule to Management -->
+        <mxCell id="schedule_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;dashPattern=8 8;endArrow=block;endFill=1;" edge="1" parent="1" source="schedule_box" target="mgmt_box">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1170" y="820" />
+              <mxPoint x="1700" y="820" />
+              <mxPoint x="1700" y="100" />
+              <mxPoint x="180" y="100" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Management to Staging -->
+        <mxCell id="mgmt_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;dashed=1;dashPattern=8 8;endArrow=block;endFill=1;" edge="1" parent="1" source="mgmt_box" target="staging_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- DETAILED DIMENSION TABLES INFO -->
+        <mxCell id="dim_detail_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;dashed=1;dashPattern=5 5;" vertex="1" parent="1">
+          <mxGeometry x="40" y="720" width="800" height="160" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dim_detail_title" value="DIMENSION TABLES IN DATA WAREHOUSE (HUB - MySQL)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="240" y="730" width="400" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dim_product" value="DIM_Product&#xa;• product_key (PK)&#xa;• product_id&#xa;• name, brand, model&#xa;• category, subcategory&#xa;• specifications" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;fontSize=8;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="60" y="760" width="120" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dim_source" value="DIM_Source&#xa;• source_key (PK)&#xa;• source_id&#xa;• source_name&#xa;• source_url&#xa;• active_flag" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;fontSize=8;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="200" y="760" width="110" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dim_date" value="DIM_Date&#xa;• date_key (PK)&#xa;• full_date&#xa;• day, month, year&#xa;• quarter, week&#xa;• is_weekend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;fontSize=8;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="330" y="760" width="100" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dim_price" value="DIM_Price_History&#xa;• price_key (PK)&#xa;• product_key (FK)&#xa;• source_key (FK)&#xa;• date_key (FK)&#xa;• original_price&#xa;• sale_price&#xa;• discount_%" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;fontSize=8;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="450" y="760" width="120" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dim_inventory" value="DIM_Inventory&#xa;• inventory_key (PK)&#xa;• product_key (FK)&#xa;• source_key (FK)&#xa;• date_key (FK)&#xa;• stock_status&#xa;• availability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;fontSize=8;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="590" y="760" width="120" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dim_review" value="DIM_Review&#xa;• review_key (PK)&#xa;• product_key (FK)&#xa;• source_key (FK)&#xa;• rating&#xa;• review_count&#xa;• review_date" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;fontSize=8;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="730" y="760" width="100" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- DATA FLOW LABELS -->
+        <mxCell id="flow_extract" value="Extract" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=8;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="380" y="325" width="40" height="15" as="geometry" />
+        </mxCell>
+
+        <mxCell id="flow_transform" value="Transform" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=8;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="580" y="325" width="50" height="15" as="geometry" />
+        </mxCell>
+
+        <mxCell id="flow_load" value="Load" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=8;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="780" y="325" width="40" height="15" as="geometry" />
+        </mxCell>
+
+        <!-- LEGEND SECTION -->
+        <mxCell id="legend_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1290" y="720" width="370" height="160" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend_title" value="LEGEND / CHÚ THÍCH" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1290" y="730" width="370" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend_content" value="🔵 Data Sources: TheGioiDiDong, CellphoneS&#xa;🟣 Staging Area: ETL Processing (Extract-Transform-Load)&#xa;🟢 Central Hub: Normalized dimension tables (MySQL)&#xa;🟡 Data Marts: Dimensional models for specific analysis&#xa;🔴 Access Tools: Reporting, Mining, Visualization&#xa;📝 Log: Process tracking and error monitoring&#xa;⏰ Schedule: Automated job scheduling&#xa;⚙️ Management: System control and monitoring&#xa;──▶ Solid Line: Data flow&#xa;- - ▶ Dashed Line: Control/Log flow" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=8;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="755" width="350" height="115" as="geometry" />
+        </mxCell>
+
+        <!-- ARCHITECTURE NOTES -->
+        <mxCell id="notes_box" value="ARCHITECTURE NOTES:" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;fontSize=10;fontStyle=1;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="900" y="80" width="760" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="notes_content" value="✓ Hub-and-Spoke Architecture: Central normalized hub feeds multiple dimensional data marts&#xa;✓ Data Sources: Web scraping from TheGioiDiDong.com and CellphoneS.com.vn&#xa;✓ ETL Process: Automated extraction, transformation, cleansing, and loading&#xa;✓ Central Hub: MySQL database with ONLY dimension tables (NO fact tables as requested)&#xa;✓ Dimension Tables: Product, Source, Date, Price History, Inventory, Review&#xa;✓ Data Marts (Spokes): Specialized marts for Price Analysis, Product Performance, Inventory Monitoring&#xa;✓ Conformed Dimensions: Shared dimensions ensure consistency across all marts&#xa;✓ Logging System: Comprehensive tracking of ETL processes, errors, and queries&#xa;✓ Scheduling: Automated daily/weekly data refresh with optional real-time updates&#xa;✓ Management Layer: System control, monitoring, and script execution&#xa;✓ Access Methods: Multiple tools for reporting, OLAP analysis, visualization, and data mining&#xa;✓ Scalability: Architecture supports adding new data marts without modifying existing structure" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=8;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="910" y="105" width="740" height="145" as="geometry" />
+        </mxCell>
+
+        <!-- FOOTER -->
+        <mxCell id="footer" value="Hub-and-Spoke Data Warehouse Architecture for E-Commerce Product Analysis | MySQL Database | Created: October 2025" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=9;fontStyle=2;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="400" y="860" width="1000" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
