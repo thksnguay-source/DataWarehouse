@@ -1,0 +1,12 @@
+{
+  "run_id": "e086672f",
+  "timestamp": "2025-10-28T23:52:54.839693",
+  "duration_seconds": 0.089959,
+  "input_records": 46,
+  "processed_records": 46,
+  "staging_records": 46,
+  "dim_source": 1,
+  "dim_product": 46,
+  "dim_price_history": 46,
+  "status": "SUCCESS"
+}

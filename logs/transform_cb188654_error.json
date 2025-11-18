@@ -1,0 +1,8 @@
+{
+  "run_id": "cb188654",
+  "timestamp": "2025-10-28T23:49:22.833879",
+  "duration_seconds": 0.023006,
+  "input_records": 46,
+  "status": "ERROR",
+  "error_message": "too many values to unpack (expected 2)"
+}
