@@ -21,18 +21,25 @@ def start_etl_log():
     batch_id = f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     try:
         with engine.begin() as conn:
+            # Tạo bảng etl_log nếu chưa có (theo cấu trúc thực tế)
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS etl_log (
                     etl_id INT AUTO_INCREMENT PRIMARY KEY,
-                    batch_id VARCHAR(255),
-                    status VARCHAR(50),
-                    error_msg TEXT,
+                    batch_id VARCHAR(50) NOT NULL,
+                    source_table VARCHAR(50) NOT NULL DEFAULT '',
+                    target_table VARCHAR(50) NOT NULL DEFAULT '',
                     records_inserted INT DEFAULT 0,
-                    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    end_time DATETIME
+                    records_updated INT DEFAULT 0,
+                    records_skipped INT DEFAULT 0,
+                    status ENUM('running','success','failed') DEFAULT 'running',
+                    start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    end_time TIMESTAMP NULL DEFAULT NULL
                 )
             """))
-            conn.execute(text("INSERT INTO etl_log (batch_id, status) VALUES (:batch_id, 'running')"), {"batch_id": batch_id})
+            conn.execute(text("""
+                INSERT INTO etl_log (batch_id, source_table, target_table, status) 
+                VALUES (:batch_id, 'general', 'stg_products,dim_product', 'running')
+            """), {"batch_id": batch_id})
             res_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
         print(f" Bắt đầu ETL batch: {batch_id} (ID: {res_id})")
         return res_id, batch_id
@@ -45,13 +52,15 @@ def update_error_log(etl_id, error_msg):
         return
     engine = create_mysql_engine()
     with engine.begin() as conn:
+        # Bảng etl_log không có cột error_msg, chỉ cập nhật status
         conn.execute(text("""
             UPDATE etl_log
             SET status='failed',
-                error_msg=:msg,
                 end_time=NOW()
             WHERE etl_id = :id
-        """), {"msg": str(error_msg), "id": etl_id})
+        """), {"id": etl_id})
+        # In thông báo lỗi ra console
+        print(f"   ⚠️  Lỗi ETL: {str(error_msg)[:200]}")
 
 def update_success_log(etl_id, inserted_count):
     if not etl_id:
@@ -299,7 +308,8 @@ def load_to_dim():
         column_definitions = ["product_id INT AUTO_INCREMENT PRIMARY KEY"]
         
         for col_name, data_type, max_length in columns_info:
-            col_name_escaped = f"`{col_name}`" if ' ' in col_name or '-' in col_name else col_name
+            # Luôn escape tên cột với backtick để tránh lỗi với tên đặc biệt
+            col_name_escaped = f"`{col_name}`"
             
             # Chuyển đổi kiểu dữ liệu phù hợp
             if data_type == 'text':
@@ -318,24 +328,25 @@ def load_to_dim():
             
             column_definitions.append(col_def)
         
+        # Drop và tạo lại bảng để đảm bảo cấu trúc đúng
+        # (Vì CREATE TABLE IF NOT EXISTS không thay đổi cấu trúc nếu bảng đã tồn tại)
+        conn.execute(text("DROP TABLE IF EXISTS dim_product"))
+        
         # Tạo bảng dim_product với tất cả các cột giống stg_products
         create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS dim_product (
+            CREATE TABLE dim_product (
                 {', '.join(column_definitions)}
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
         """
         
         conn.execute(text(create_table_sql))
-        print("   ✓ Đã tạo/cập nhật bảng dim_product với tất cả các cột từ stg_products")
+        print("   ✓ Đã tạo bảng dim_product với tất cả các cột từ stg_products")
         
-        # Xóa dữ liệu cũ (nếu muốn replace hoàn toàn)
-        # Hoặc có thể dùng TRUNCATE hoặc DELETE
-        conn.execute(text("TRUNCATE TABLE dim_product"))
-        print("   ✓ Đã xóa dữ liệu cũ trong dim_product")
+        # Không cần TRUNCATE vì đã DROP và tạo lại bảng
         
         # Lấy danh sách tất cả các cột (trừ product_id vì là AUTO_INCREMENT)
-        all_columns = [f"`{col[0]}`" if ' ' in col[0] or '-' in col[0] else col[0] 
-                      for col in columns_info]
+        # Luôn escape tất cả tên cột với backtick
+        all_columns = [f"`{col[0]}`" for col in columns_info]
         columns_str = ', '.join(all_columns)
         
         # Insert toàn bộ dữ liệu từ stg_products sang dim_product
