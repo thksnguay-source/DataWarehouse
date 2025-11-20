@@ -215,7 +215,7 @@ class SimpleCrawler:
     def save_results(self):
         """Lưu kết quả ra file"""
         # Lưu ra file JSON
-        with open('simple_crawled_products.json', 'w', encoding='utf-8') as f:
+        with open('cellphoneS.json', 'w', encoding='utf-8') as f:
             json.dump(self.all_products, f, ensure_ascii=False, indent=2)
 
         # In thống kê
@@ -249,7 +249,7 @@ class SimpleCrawler:
         for brand, count in brand_stats.items():
             print(f"  {brand}: {count} sản phẩm")
 
-        print(f"\n✓ Đã lưu kết quả vào file 'simple_crawled_products.json'")
+        print(f"\n✓ Đã lưu kết quả vào file 'cellphoneS.json'")
 
 
 def main():
