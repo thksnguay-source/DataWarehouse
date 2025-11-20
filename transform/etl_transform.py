@@ -1,8 +1,11 @@
 import json
 import re
 from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.types import Text as SQLText
 
 # ============================================
 # MYSQL CONNECTION
@@ -76,9 +79,89 @@ def update_success_log(etl_id, inserted_count):
         """), {"cnt": inserted_count, "id": etl_id})
     print(f" Đã cập nhật Log: Success (Inserted: {inserted_count})")
 
+# Đường dẫn gốc dự án (ví dụ: D:\datawh)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # ============================================
 # EXTRACT
 # ============================================
+def extract_from_json(json_path=None):
+    """
+    Đọc dữ liệu từ file JSON unified_products.json
+    (danh sách các object giống như ví dụ user cung cấp).
+    """
+    print("\n" + "="*60)
+    print("BƯỚC 1: EXTRACT - Đọc dữ liệu từ file JSON unified_products.json")
+    print("="*60)
+    if json_path is None:
+        json_path = PROJECT_ROOT / "crawed" / "unified_products.json"
+    else:
+        json_path = Path(json_path)
+        if not json_path.is_absolute():
+            json_path = (PROJECT_ROOT / json_path).resolve()
+
+    try
+        print(f"   → File: {json_path}")
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if isinstance(data, dict):
+            # Phòng trường hợp json là object { "data": [...] }
+            # thì ưu tiên key 'data' hoặc giá trị list đầu tiên.
+            if "data" in data and isinstance(data["data"], list):
+                records = data["data"]
+            else:
+                # Lấy list đầu tiên tìm được
+                records = None
+                for v in data.values():
+                    if isinstance(v, list):
+                        records = v
+                        break
+                if records is None:
+                    raise ValueError("Cấu trúc JSON không đúng định dạng list bản ghi.")
+        else:
+            records = data
+
+        df = pd.DataFrame(records)
+        print(f" Đã đọc {len(df)} dòng từ file {json_path}")
+        return df
+    except Exception as e:
+        print(f" Lỗi khi đọc dữ liệu từ JSON: {e}")
+        raise
+
+
+def load_raw_json_to_general(json_path=None):
+    """
+    Nạp toàn bộ dữ liệu JSON (dạng text) vào bảng general.
+    Các cột của general sẽ tự động khớp theo cột trong file JSON.
+    """
+    print("\n" + "="*60)
+    print("BƯỚC 0: LOAD RAW - Nạp dữ liệu JSON thô vào bảng general")
+    print("="*60)
+    df_raw = extract_from_json(json_path)
+    if df_raw.empty:
+        print(" ⚠️ File JSON không có dữ liệu, bỏ qua bước nạp general.")
+        return 0
+
+    # Đảm bảo mọi giá trị (ngoại trừ NULL) đều ở dạng chuỗi để lưu đúng TEXT
+    df_text = df_raw.copy()
+    for col in df_text.columns:
+        df_text[col] = df_text[col].apply(
+            lambda v: None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+        )
+
+    engine = create_mysql_engine()
+    dtype_map = {col: SQLText() for col in df_text.columns}
+
+    try:
+        df_text.to_sql('general', engine, if_exists='replace', index=False, dtype=dtype_map, chunksize=1000)
+        print(f" ✅ Đã nạp {len(df_text)} dòng vào bảng general (kiểu TEXT cho mọi cột)")
+        return len(df_text)
+    except Exception as e:
+        print(f" ❌ Lỗi khi nạp dữ liệu vào general: {e}")
+        raise
+
+
 def extract_from_general():
     print("\n" + "="*60)
     print("BƯỚC 1: EXTRACT - Đọc dữ liệu từ bảng general")
@@ -383,20 +466,80 @@ def load_to_dim():
     print(f" ✅ Đã load {inserted_count} dòng vào dim_product (toàn bộ dữ liệu từ stg_products)")
     return inserted_count
 
+
+# ============================================
+# SYNC DATE_KEY + DIM
+# ============================================
+def sync_date_key_and_dim(rebuild_dim=True):
+    print("\n" + "="*60)
+    print("BƯỚC 4: SYNC - Đồng bộ date_key & dim_product")
+    print("="*60)
+    engine = create_mysql_engine()
+
+    with engine.begin() as conn:
+        stg_count = conn.execute(text("SELECT COUNT(*) FROM stg_products")).scalar()
+        if stg_count == 0:
+            print(" ⚠️ stg_products đang trống, bỏ qua đồng bộ date_key.")
+            return 0
+
+        date_count = conn.execute(text("SELECT COUNT(*) FROM date_dims")).scalar()
+        if date_count == 0:
+            raise ValueError("Bảng date_dims không có dữ liệu, không thể map date_key.")
+
+        has_ngay = conn.execute(text("""
+            SELECT COUNT(*) 
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'datawarehouse'
+              AND TABLE_NAME = 'stg_products'
+              AND COLUMN_NAME = 'ngay_crawl'
+        """)).scalar()
+
+        if has_ngay == 0:
+            raise KeyError("Không tìm thấy cột 'ngay_crawl' trong stg_products.")
+
+        # Cập nhật date_key dựa trên date_dims
+        conn.execute(text("""
+            UPDATE stg_products s
+            LEFT JOIN date_dims d ON DATE(s.ngay_crawl) = DATE(d.full_date)
+            SET s.date_key = d.date_sk
+        """))
+
+        missing = conn.execute(text("""
+            SELECT COUNT(*) 
+            FROM stg_products s
+            LEFT JOIN date_dims d ON DATE(s.ngay_crawl) = DATE(d.full_date)
+            WHERE d.date_sk IS NULL
+        """)).scalar()
+
+    if missing:
+        print(f" ⚠️ Có {missing} dòng chưa match được date_key trong date_dims.")
+    else:
+        print(" ✅ date_key trong stg_products đã đồng bộ với date_dims.")
+
+    if rebuild_dim:
+        print(" 🔄 Đang rebuild dim_product sau khi cập nhật date_key...")
+        return load_to_dim()
+
+    return 0
+
 # ============================================
 # MAIN ETL PROCESS
 # ============================================
 def run_etl():
-    print("BẮT ĐẦU QUY TRÌNH ETL: GENERAL → STG_PRODUCTS → DIM_PRODUCT")
+    print("BẮT ĐẦU QUY TRÌNH ETL: JSON → GENERAL → STG_PRODUCTS → DIM_PRODUCT")
     etl_id, batch_id = start_etl_log()
     try:
+        # Bước 0: nạp dữ liệu thô vào bảng general
+        load_raw_json_to_general()
+
+        # Bước 1: đọc dữ liệu từ bảng general để transform
         df = extract_from_general()
         if len(df) == 0:
             print("  Không có dữ liệu để xử lý!")
             return
         df_clean = transform_data(df)
         inserted_stg = load_to_staging(df_clean)
-        inserted_dim = load_to_dim()
+        inserted_dim = sync_date_key_and_dim(rebuild_dim=True)
         update_success_log(etl_id, inserted_stg)
         print("\nETL HOÀN TẤT THÀNH CÔNG!")
         print(f"  • Batch ID: {batch_id}\n  • Dòng đã xử lý (staging): {inserted_stg}\n  • Dòng nạp vào dim: {inserted_dim}\n  • Trạng thái: SUCCESS")
