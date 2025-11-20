@@ -1,12 +1,10 @@
-import sys
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
-print("Python:", sys.executable)
-print("Python arch:", sys.maxsize > 2**32 and "64-bit" or "32-bit")
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service)
 
-modules = ["selenium", "pandas", "sqlalchemy"]
-for m in modules:
-    try:
-        __import__(m)
-        print(f"{m} OK")
-    except Exception as e:
-        print(f"{m} lỗi: {e}")
+driver.get("https://www.google.com")
+print(driver.title)
+driver.quit()
