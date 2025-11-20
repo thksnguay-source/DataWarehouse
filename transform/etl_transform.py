@@ -12,12 +12,19 @@ from sqlalchemy.types import Text as SQLText
 # MYSQL CONNECTION
 # ============================================
 MYSQL_DB = "datawarehouse"  # Giữ đúng tên schema đang sử dụng trong MySQL
+CONTROL_DB = "control"      # Database phục vụ ghi log quy trình
 
 def get_mysql_url():
     return "mysql+pymysql://root:@localhost:3306/datawarehouse?charset=utf8mb4"
 
 def create_mysql_engine():
     return create_engine(get_mysql_url(), pool_pre_ping=True)
+
+def get_control_mysql_url():
+    return "mysql+pymysql://root:@localhost:3306/control?charset=utf8mb4"
+
+def create_control_engine():
+    return create_engine(get_control_mysql_url(), pool_pre_ping=True)
 
 # ============================================
 # ETL LOG FUNCTIONS
@@ -85,6 +92,29 @@ def update_success_log(etl_id, inserted_count, updated_count=0):
 
 # Đường dẫn gốc dự án (ví dụ: D:\datawh)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+CONTROL_PROCESS_METADATA = {
+    "extract": {
+        "name": "Extract",
+        "description": "Trích xuất dữ liệu từ nguồn vào bảng general.",
+        "order": 1,
+    },
+    "transform": {
+        "name": "Transform",
+        "description": "Chuẩn hóa dữ liệu trung gian trước khi load.",
+        "order": 2,
+    },
+    "load_staging": {
+        "name": "Load_Staging",
+        "description": "Đưa dữ liệu chuẩn hóa vào stg_products.",
+        "order": 3,
+    },
+    "load_dwh": {
+        "name": "LoadDataWarehouse",
+        "description": "Đồng bộ và ghi nhận SCD vào dim_product.",
+        "order": 4,
+    },
+}
 
 
 def resolve_simulated_datetime(simulated_date):
@@ -263,6 +293,118 @@ def normalize_date_key(value):
     return value_str
 
 # ============================================
+# CONTROL DB LOGGING (ETL MONITORING)
+# ============================================
+
+def _ensure_control_tables(conn):
+    """
+    Đảm bảo các bảng control.process & control.etl_log tồn tại đúng cấu trúc.
+    """
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS process (
+            process_id INT(11) NOT NULL AUTO_INCREMENT,
+            process_name VARCHAR(100) NOT NULL,
+            process_description VARCHAR(255) DEFAULT NULL,
+            step_order INT(11) NOT NULL COMMENT 'Thứ tự thực hiện của process',
+            PRIMARY KEY (process_id),
+            UNIQUE KEY uq_process_name (process_name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    """))
+
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS etl_log (
+            etl_id INT(11) NOT NULL AUTO_INCREMENT,
+            batch_id VARCHAR(50) NOT NULL,
+            process_id INT(11) NOT NULL,
+            source_table VARCHAR(50) DEFAULT NULL,
+            target_table VARCHAR(50) DEFAULT NULL,
+            records_inserted INT(11) DEFAULT 0,
+            records_updated INT(11) DEFAULT 0,
+            records_skipped INT(11) DEFAULT 0,
+            status ENUM('started','success','failed') DEFAULT 'started',
+            start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            end_time TIMESTAMP NULL DEFAULT NULL,
+            PRIMARY KEY (etl_id),
+            KEY fk_etl_log_process (process_id),
+            CONSTRAINT fk_etl_log_process FOREIGN KEY (process_id)
+                REFERENCES process (process_id) ON UPDATE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    """))
+
+
+def _ensure_control_process(conn, process_key):
+    """
+    Thêm metadata process nếu chưa tồn tại (không thay đổi thuộc tính hiện có).
+    """
+    meta = CONTROL_PROCESS_METADATA[process_key]
+    process_id = conn.execute(
+        text("SELECT process_id FROM process WHERE process_name = :name"),
+        {"name": meta["name"]},
+    ).scalar()
+    if process_id:
+        return process_id
+
+    conn.execute(
+        text("""
+            INSERT INTO process (process_name, process_description, step_order)
+            VALUES (:name, :desc, :order_no)
+        """),
+        {"name": meta["name"], "desc": meta["description"], "order_no": meta["order"]},
+    )
+    return conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+
+
+def control_log_start(process_key, batch_id, source_table="", target_table=""):
+    """
+    Ghi nhận thời điểm bắt đầu 1 process trong DB control.
+    """
+    engine = create_control_engine()
+    with engine.begin() as conn:
+        _ensure_control_tables(conn)
+        process_id = _ensure_control_process(conn, process_key)
+        conn.execute(
+            text("""
+                INSERT INTO etl_log (batch_id, process_id, source_table, target_table, status)
+                VALUES (:batch_id, :process_id, :source_table, :target_table, 'started')
+            """),
+            {
+                "batch_id": batch_id,
+                "process_id": process_id,
+                "source_table": source_table or "",
+                "target_table": target_table or "",
+            },
+        )
+        return conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+
+
+def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=0):
+    """
+    Cập nhật trạng thái cho process log tương ứng.
+    """
+    if not log_id:
+        return
+    engine = create_control_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE etl_log
+                SET status = :status,
+                    records_inserted = :inserted,
+                    records_updated = :updated,
+                    records_skipped = :skipped,
+                    end_time = NOW()
+                WHERE etl_id = :etl_id
+            """),
+            {
+                "status": status,
+                "inserted": inserted or 0,
+                "updated": updated or 0,
+                "skipped": skipped or 0,
+                "etl_id": log_id,
+            },
+        )
+
+# ============================================
 # EXTRACT
 # ============================================
 def extract_from_json(json_path=None):
@@ -271,10 +413,10 @@ def extract_from_json(json_path=None):
     (danh sách các object giống như ví dụ user cung cấp).
     """
     print("\n" + "="*60)
-    print("BƯỚC 1: EXTRACT - Đọc dữ liệu từ file JSON unified_products.json")
+    print("BƯỚC 1: EXTRACT - Đọc dữ liệu từ file JSON unified_products1.json")
     print("="*60)
     if json_path is None:
-        json_path = PROJECT_ROOT / "crawed" / "unified_products.json"
+        json_path = PROJECT_ROOT / "crawed" / "unified_products1.json"
     else:
         json_path = Path(json_path)
         if not json_path.is_absolute():
@@ -839,17 +981,49 @@ def sync_date_key_and_dim(rebuild_dim=True):
 def run_etl(simulated_date=None, stage_only=False, auto_compare=False):
     print("BẮT ĐẦU QUY TRÌNH ETL: JSON → GENERAL → STG_PRODUCTS → DIM_PRODUCT")
     etl_id, batch_id = start_etl_log()
+    control_logs = {
+        "extract": None,
+        "transform": None,
+        "load_staging": None,
+        "load_dwh": None,
+    }
     try:
         # Bước 0: nạp dữ liệu thô vào bảng general
-        load_raw_json_to_general()
+        control_logs["extract"] = control_log_start(
+            "extract",
+            batch_id,
+            source_table="unified_products1.json",
+            target_table="general",
+        )
+        inserted_general = load_raw_json_to_general()
+        control_log_finish(control_logs["extract"], "success", inserted=inserted_general)
+        control_logs["extract"] = None
 
         # Bước 1: đọc dữ liệu từ bảng general để transform
+        control_logs["transform"] = control_log_start(
+            "transform",
+            batch_id,
+            source_table="general",
+            target_table="pandas_dataframe",
+        )
         df = extract_from_general()
         if len(df) == 0:
+            control_log_finish(control_logs["transform"], "success", skipped=1)
             print("  Không có dữ liệu để xử lý!")
             return
         df_clean = transform_data(df, simulated_date=simulated_date)
+        control_log_finish(control_logs["transform"], "success", inserted=len(df_clean))
+        control_logs["transform"] = None
+
+        control_logs["load_staging"] = control_log_start(
+            "load_staging",
+            batch_id,
+            source_table="general",
+            target_table="stg_products",
+        )
         inserted_stg = load_to_staging(df_clean)
+        control_log_finish(control_logs["load_staging"], "success", inserted=inserted_stg)
+        control_logs["load_staging"] = None
 
         if stage_only:
             print(" ⏸️ Đã dừng theo yêu cầu sau bước load stg_products.")
@@ -858,7 +1032,20 @@ def run_etl(simulated_date=None, stage_only=False, auto_compare=False):
             update_success_log(etl_id, 0, 0)
             return
 
+        control_logs["load_dwh"] = control_log_start(
+            "load_dwh",
+            batch_id,
+            source_table="stg_products",
+            target_table="dim_product",
+        )
         inserted_dim, updated_dim = sync_date_key_and_dim(rebuild_dim=True)
+        control_log_finish(
+            control_logs["load_dwh"],
+            "success",
+            inserted=inserted_dim,
+            updated=updated_dim,
+        )
+        control_logs["load_dwh"] = None
         update_success_log(etl_id, inserted_dim, updated_dim)
         print("\nETL HOÀN TẤT THÀNH CÔNG!")
         print(
@@ -870,6 +1057,10 @@ def run_etl(simulated_date=None, stage_only=False, auto_compare=False):
     except Exception as e:
         print("❌ ETL THẤT BẠI!")
         print(f" Lỗi: {e}")
+        # Đánh dấu các process đang dang dở là failed
+        for key, log_id in control_logs.items():
+            if log_id:
+                control_log_finish(log_id, status="failed")
         update_error_log(etl_id, str(e))
         raise
 
