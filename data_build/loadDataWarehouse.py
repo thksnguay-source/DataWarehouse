@@ -43,9 +43,9 @@ class CustomMultiResultCursor(CMySQLCursor):
         # FIX: Truy cập _cmysql thông qua _connection
         return self._connection._cmysql.next_result()
 
-
+# 1. Khởi tạo & Kiểm tra Nguồn
 def get_latest_staging_batch(conn_config):
-    """Tìm Batch Staging mới nhất đã hoàn thành."""
+    # 1.1 Tìm Batch Staging mới nhất đã hoàn thành
     conn_staging = None
     try:
         conn_staging = mysql.connector.connect(**conn_config, database=DB_STAGING)
@@ -61,13 +61,15 @@ def get_latest_staging_batch(conn_config):
         cursor.execute(sql_check)
         result = cursor.fetchone()
         cursor.close()
-
+        # 1.2 Check có tìm thấy Batch ID?
         if result:
             batch_id, start_time = result
             print(
+                #1.3.1 Return batch_id
                 f"[{datetime.now().strftime('%H:%M:%S')}] Tìm thấy Batch Staging mới nhất: **{batch_id}** (Thời gian: {start_time})")
             return batch_id
         else:
+            #1.3.2 Return message 'Không có dữ liệu '
             print(f"[{datetime.now().strftime('%H:%M:%S')}] KHÔNG tìm thấy batch Staging thành công.")
             return None
 
@@ -75,15 +77,14 @@ def get_latest_staging_batch(conn_config):
         print(f"LỖI KHI CHECK LOG STAGING: {err}")
         return None
     finally:
+
         if conn_staging and conn_staging.is_connected():
             conn_staging.close()
 
-
+#2. Xử lý ETL cho từng Dimension
 def run_etl_dimension(conn_datawh, dim_name, source_db, pk_column, batch_id):
-    """
-    Thực thi Stored Procedure SP_RUN_ETL_DIM.
-    Sử dụng CustomMultiResultCursor để xử lý đa bộ kết quả.
-    """
+
+    #2.1 Tạo chuỗi SQL và gọi proc SP_RUN_ETL_DIM
     cursor = None
     sql_call = f"CALL {DB_DATAWH}.SP_RUN_ETL_DIM('{batch_id}', '{dim_name}', '{source_db}', '{pk_column}')"
 
@@ -91,41 +92,37 @@ def run_etl_dimension(conn_datawh, dim_name, source_db, pk_column, batch_id):
     print(f"SQL: {sql_call}")
 
     try:
-        # 1. SỬ DỤNG CUSTOM CURSOR ĐÃ SỬA ĐỔI
         cursor = conn_datawh.cursor(cursor_class=CustomMultiResultCursor)
         cursor.execute(sql_call)
 
         results = None
 
-        # 2. Đọc Result Set thống kê cuối cùng
+        # 2.2 Đọc kết quả Result Set
         try:
             results = cursor.fetchone()
         except mysql.connector.Error as err:
             print(f"   -> Cảnh báo: Lỗi khi fetchone Result Set thống kê: {err}")
 
-        # 3. Vòng lặp dọn dẹp TẤT CẢ các Result Set còn lại
+        # 2.3 Vòng lặp dọn dẹp các Result Set còn lại
         while cursor.next_result():
             try:
                 cursor.fetchall()
             except mysql.connector.Error:
                 continue
 
-        # 4. Đóng Cursor
         cursor.close()
-
-        # 5. Thực hiện COMMIT (Đã an toàn)
         conn_datawh.commit()
-
-        # 6. Xử lý kết quả thống kê
+        # 2.4 Check Thực thi SP có lỗi SQL?
         if results and len(results) == 2:
             inserted, updated = results
+
             print(f"   -> Kết quả: **INSERTED={inserted}**, **UPDATED={updated}**")
         else:
             print("   -> Cảnh báo: Không nhận được kết quả thống kê (inserted/updated) từ SP.")
 
 
     except mysql.connector.Error as err:
-        print(f"   -> ❌ LỖI ETL cho {dim_name}: **{err}**")
+        print(f"   -> LỖI ETL cho {dim_name}: **{err}**")
         if conn_datawh and conn_datawh.is_connected():
             conn_datawh.rollback()
     finally:
