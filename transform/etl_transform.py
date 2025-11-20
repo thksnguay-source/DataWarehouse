@@ -1,5 +1,6 @@
 import json
 import re
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from sqlalchemy.types import Text as SQLText
 # ============================================
 # MYSQL CONNECTION
 # ============================================
+MYSQL_DB = "datawarehouse"  # Giữ đúng tên schema đang sử dụng trong MySQL
+
 def get_mysql_url():
     return "mysql+pymysql://root:@localhost:3306/datawarehouse?charset=utf8mb4"
 
@@ -65,7 +68,7 @@ def update_error_log(etl_id, error_msg):
         # In thông báo lỗi ra console
         print(f"   ⚠️  Lỗi ETL: {str(error_msg)[:200]}")
 
-def update_success_log(etl_id, inserted_count):
+def update_success_log(etl_id, inserted_count, updated_count=0):
     if not etl_id:
         return
     engine = create_mysql_engine()
@@ -73,14 +76,191 @@ def update_success_log(etl_id, inserted_count):
         conn.execute(text("""
             UPDATE etl_log
             SET status='success',
-                records_inserted=:cnt,
+                records_inserted=:inserted,
+                records_updated=:updated,
                 end_time=NOW()
             WHERE etl_id = :id
-        """), {"cnt": inserted_count, "id": etl_id})
-    print(f" Đã cập nhật Log: Success (Inserted: {inserted_count})")
+        """), {"inserted": inserted_count, "updated": updated_count, "id": etl_id})
+    print(f" Đã cập nhật Log: Success (Inserted: {inserted_count}, Updated: {updated_count})")
 
 # Đường dẫn gốc dự án (ví dụ: D:\datawh)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def resolve_simulated_datetime(simulated_date):
+    """
+    Hỗ trợ parse ngày giả lập (ví dụ '21/11/2025') để đồng bộ xuyên suốt ETL.
+    """
+    if simulated_date is None:
+        return None
+    if isinstance(simulated_date, datetime):
+        return simulated_date
+    if isinstance(simulated_date, pd.Timestamp):
+        return simulated_date.to_pydatetime()
+    if isinstance(simulated_date, str):
+        cleaned = simulated_date.strip()
+        date_formats = [
+            "%d/%m/%Y",
+            "%Y-%m-%d",
+            "%d-%m-%Y",
+            "%d/%m/%Y %H:%M:%S",
+            "%Y%m%d",
+        ]
+        for fmt in date_formats:
+            try:
+                return datetime.strptime(cleaned, fmt)
+            except ValueError:
+                continue
+    raise ValueError(
+        f"Không thể chuyển đổi ngày giả lập: {simulated_date}. "
+        "Hãy sử dụng định dạng dd/mm/YYYY hoặc YYYY-mm-dd."
+    )
+
+def _normalize_value_for_hash(value):
+    if value is None:
+        return ""
+    if isinstance(value, float) and pd.isna(value):
+        return ""
+    if isinstance(value, (datetime, pd.Timestamp)):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return str(value).strip()
+
+
+def compute_record_hash(row, columns):
+    normalized = [_normalize_value_for_hash(row.get(col, None)) for col in columns]
+    raw = "||".join(normalized)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def build_mysql_column_definition(col_name, data_type, max_length):
+    col_name_escaped = f"`{col_name}`"
+    data_type = (data_type or "").lower()
+
+    if data_type == "text":
+        sql_type = "TEXT"
+    elif data_type == "varchar":
+        length = max_length or 255
+        sql_type = f"VARCHAR({length})"
+    elif data_type == "datetime":
+        sql_type = "DATETIME"
+    elif data_type in {"int", "bigint"}:
+        sql_type = "INT"
+    elif data_type == "decimal":
+        sql_type = "DECIMAL(10,2)"
+    else:
+        sql_type = data_type.upper() if data_type else "TEXT"
+
+    return f"{col_name_escaped} {sql_type} NULL"
+
+
+def ensure_dim_product_structure(conn, columns_info):
+    """
+    Đảm bảo dim_product tồn tại với đầy đủ cột (bao gồm metadata phục vụ SCD2).
+    """
+    column_definitions = {}
+    for col_name, data_type, max_length in columns_info:
+        column_definitions[col_name] = build_mysql_column_definition(col_name, data_type, max_length)
+
+    metadata_definitions = {
+        "record_hash": "CHAR(64) NOT NULL",
+        # Thêm DEFAULT để tránh lỗi strict mode khi bảng đã có sẵn dữ liệu
+        "effective_start": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "effective_end": "DATETIME NULL",
+        "is_current": "TINYINT(1) NOT NULL DEFAULT 1",
+        "version_no": "INT NOT NULL DEFAULT 1",
+    }
+
+    create_columns = (
+        ["product_id INT AUTO_INCREMENT PRIMARY KEY"]
+        + list(column_definitions.values())
+        + [f"`{name}` {definition}" for name, definition in metadata_definitions.items()]
+    )
+
+    conn.execute(
+        text(
+            f"""
+            CREATE TABLE IF NOT EXISTS dim_product (
+                {', '.join(create_columns)}
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+        """
+        )
+    )
+
+    existing_columns = {
+        row[0]
+        for row in conn.execute(
+            text(
+                """
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = :schema
+                  AND TABLE_NAME = 'dim_product'
+            """
+            ),
+            {"schema": MYSQL_DB},
+        )
+    }
+
+    for col_name, col_def in column_definitions.items():
+        if col_name not in existing_columns:
+            conn.execute(text(f"ALTER TABLE dim_product ADD COLUMN {col_def}"))
+            existing_columns.add(col_name)
+
+    for col_name, col_def in metadata_definitions.items():
+        if col_name not in existing_columns:
+            conn.execute(text(f"ALTER TABLE dim_product ADD COLUMN `{col_name}` {col_def}"))
+            existing_columns.add(col_name)
+
+    unique_exists = conn.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM INFORMATION_SCHEMA.STATISTICS
+            WHERE TABLE_SCHEMA = :schema
+              AND TABLE_NAME = 'dim_product'
+              AND INDEX_NAME = 'unique_product'
+        """
+        ),
+        {"schema": MYSQL_DB},
+    ).scalar()
+
+    if unique_exists:
+        conn.execute(text("ALTER TABLE dim_product DROP INDEX unique_product"))
+
+    idx_exists = conn.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM INFORMATION_SCHEMA.STATISTICS
+            WHERE TABLE_SCHEMA = :schema
+              AND TABLE_NAME = 'dim_product'
+              AND INDEX_NAME = 'idx_dim_product_ten'
+        """
+        ),
+        {"schema": MYSQL_DB},
+    ).scalar()
+
+    if not idx_exists:
+        try:
+            conn.execute(text("CREATE INDEX idx_dim_product_ten ON dim_product (ten_san_pham)"))
+        except Exception:
+            pass
+
+    ordered_columns = list(column_definitions.keys()) + list(metadata_definitions.keys())
+    return ordered_columns
+
+
+def normalize_date_key(value):
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    value_str = str(value).strip()
+    if value_str.lower() in {"", "nan", "none", "nat", "null"}:
+        return None
+    return value_str
 
 # ============================================
 # EXTRACT
@@ -100,7 +280,7 @@ def extract_from_json(json_path=None):
         if not json_path.is_absolute():
             json_path = (PROJECT_ROOT / json_path).resolve()
 
-    try
+    try:
         print(f"   → File: {json_path}")
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -179,11 +359,12 @@ def extract_from_general():
 # ============================================
 # TRANSFORM
 # ============================================
-def transform_data(df):
+def transform_data(df, simulated_date=None):
     print("\n" + "="*60)
     print("BƯỚC 2: TRANSFORM - Làm sạch và chuẩn hóa dữ liệu")
     print("="*60)
     df = df.copy()
+    crawl_dt = resolve_simulated_datetime(simulated_date) if simulated_date else datetime.now()
 
     # Lọc dữ liệu rác
     initial_count = len(df)
@@ -219,7 +400,7 @@ def transform_data(df):
         'GOOGLE': 'Google',
         'VSMART': 'Vsmart'
     }
-    
+
     def extract_brand(name):
         if pd.isna(name) or name == 'nan' or str(name).strip() == '':
             return 'Other'
@@ -228,7 +409,7 @@ def transform_data(df):
             if k in n:
                 return v
         return 'Other'
-    
+
     df['brand'] = df['ten_san_pham'].apply(extract_brand)
 
     # Phân loại Category
@@ -241,13 +422,13 @@ def transform_data(df):
         if 'TAB' in n or 'IPAD' in n:
             return 'Tablet'
         return 'Smartphone'
-    
+
     df['category'] = df['ten_san_pham'].apply(categorize)
 
-    # Metadata - Thêm thông tin ngày crawl (DATETIME)
-    df['ngay_crawl'] = datetime.now()
-    df['date_key'] = datetime.now().strftime("%Y%m%d")
-    
+    # Metadata - Thêm thông tin ngày crawl (DATETIME) - cho phép giả lập ngày cố định
+    df['ngay_crawl'] = crawl_dt
+    df['date_key'] = crawl_dt.strftime("%Y%m%d")
+
     # Xử lý nguồn dữ liệu (VARCHAR)
     df['nguon'] = df['nguon'].fillna('CellphoneS')
     df['nguon'] = df['nguon'].astype(str).str.strip()
@@ -260,7 +441,7 @@ def transform_data(df):
     # ============================================
     # CHUYỂN ĐỔI KIỂU DỮ LIỆU CHO CÁC CỘT
     # ============================================
-    
+
     # Xử lý tất cả các cột text - chuyển sang string và xử lý NULL
     # Giữ nguyên format text nhưng chuẩn bị để chuyển đổi kiểu dữ liệu trong SQL
     for col in df.columns:
@@ -298,14 +479,14 @@ def load_to_staging(df):
     try:
         # Sử dụng pandas to_sql để load dữ liệu
         df_to_load = df.copy()
-        
+
         # Đảm bảo ngay_crawl là datetime object để pandas tự động detect
         if 'ngay_crawl' in df_to_load.columns:
             df_to_load['ngay_crawl'] = pd.to_datetime(df_to_load['ngay_crawl'], errors='coerce')
-        
+
         # Load vào staging (pandas sẽ tự động tạo bảng với kiểu dữ liệu TEXT)
         df_to_load.to_sql('stg_products', engine, if_exists='replace', index=False, chunksize=1000)
-        
+
         # Cập nhật kiểu dữ liệu sau khi load (ALTER TABLE)
         print(" 🔄 Đang chuyển đổi kiểu dữ liệu...")
         with engine.begin() as conn:
@@ -319,7 +500,7 @@ def load_to_staging(df):
                     print("   ✓ ngay_crawl -> DATETIME")
                 except Exception as e:
                     print(f"   ⚠️  Không thể chuyển ngay_crawl sang DATETIME: {e}")
-            
+
             # Cập nhật các cột VARCHAR (text ngắn)
             varchar_updates = {
                 'nguon': 'VARCHAR(100)',
@@ -339,7 +520,7 @@ def load_to_staging(df):
                 'Thẻ SIM': 'VARCHAR(50)',
                 'Loại CPU': 'VARCHAR(50)'
             }
-            
+
             for col, dtype in varchar_updates.items():
                 if col in df.columns:
                     try:
@@ -352,15 +533,138 @@ def load_to_staging(df):
                         print(f"   ✓ {col} -> {dtype}")
                     except Exception as e:
                         print(f"   ⚠️  Không thể chuyển {col} sang {dtype}: {e}")
-            
+
             # Các cột còn lại giữ nguyên TEXT (URL, mô tả dài, thông số kỹ thuật)
             print("   ✓ Các cột khác giữ nguyên TEXT")
-        
+
         print(f" ✅ Đã load {len(df)} dòng vào bảng 'stg_products' với kiểu dữ liệu phù hợp")
         return len(df)
     except Exception as e:
         print(f" ❌ Lỗi load vào staging: {e}")
         raise
+
+
+def build_staging_snapshot(engine, target_date=None):
+    """
+    Chuẩn hóa dữ liệu stg_products (lọc theo ngày nếu cần) để so sánh/làm SCD.
+    """
+    stg_df = pd.read_sql("SELECT * FROM stg_products", engine)
+    if stg_df.empty:
+        return stg_df
+
+    if 'ten_san_pham' not in stg_df.columns:
+        raise KeyError("Cột 'ten_san_pham' bắt buộc để xác định khóa tự nhiên.")
+
+    stg_df = stg_df[~stg_df['ten_san_pham'].isna()].copy()
+    if stg_df.empty:
+        return stg_df
+
+    if 'ngay_crawl' in stg_df.columns:
+        stg_df['ngay_crawl'] = pd.to_datetime(stg_df['ngay_crawl'], errors='coerce')
+    else:
+        stg_df['ngay_crawl'] = pd.NaT
+
+    if target_date:
+        target_dt = resolve_simulated_datetime(target_date)
+        stg_df = stg_df[stg_df['ngay_crawl'].dt.date == target_dt.date()].copy()
+        if stg_df.empty:
+            return stg_df
+
+    if 'date_key' in stg_df.columns:
+        stg_df['date_key'] = (
+            stg_df['date_key']
+            .astype(str)
+            .str.replace(r"\.0$", "", regex=True)
+        )
+    else:
+        stg_df['date_key'] = None
+    stg_df['date_key'] = stg_df['date_key'].apply(normalize_date_key)
+
+    compare_columns = [col for col in stg_df.columns if col not in {'ngay_crawl', 'date_key'}]
+    stg_df['record_hash'] = stg_df.apply(lambda row: compute_record_hash(row, compare_columns), axis=1)
+
+    stg_df = stg_df.sort_values(['ten_san_pham', 'ngay_crawl'], ascending=[True, False])
+    stg_df = stg_df.drop_duplicates(subset=['ten_san_pham'], keep='first')
+    return stg_df
+
+
+def fetch_current_dim_lookup(engine):
+    """
+    Lấy dữ liệu dim_product hiện tại (is_current=1) để phục vụ so sánh.
+    """
+    try:
+        dim_current = pd.read_sql(
+            """
+            SELECT product_id, ten_san_pham, record_hash, date_key, ngay_crawl, version_no
+            FROM dim_product
+            WHERE is_current = 1
+        """,
+            engine,
+        )
+    except Exception:
+        # Trường hợp lần chạy đầu tiên chưa có dim_product
+        return {}, pd.DataFrame()
+    if dim_current.empty:
+        return {}, dim_current
+    dim_current['ten_san_pham'] = dim_current['ten_san_pham'].astype(str).str.strip()
+    current_lookup = dim_current.set_index('ten_san_pham').to_dict('index')
+    return current_lookup, dim_current
+
+
+def detect_dim_changes(stg_df, current_lookup):
+    """
+    So sánh dữ liệu stg mới với dim_product hiện tại → xác định insert/update.
+    """
+    rows_to_insert = []
+    rows_to_expire = []
+    unchanged_rows = 0
+
+    for _, row in stg_df.iterrows():
+        product_key = str(row['ten_san_pham']).strip()
+        if not product_key:
+            continue
+
+        new_hash = row['record_hash']
+        new_start = row['ngay_crawl']
+        if pd.isna(new_start):
+            new_start = datetime.now()
+            row['ngay_crawl'] = new_start
+
+        existing = current_lookup.get(product_key)
+        if not existing:
+            row_dict = row.to_dict()
+            row_dict['ten_san_pham'] = product_key
+            row_dict['date_key'] = normalize_date_key(row_dict.get('date_key'))
+            row_dict['ngay_crawl'] = new_start
+            row_dict['effective_start'] = new_start
+            row_dict['effective_end'] = None
+            row_dict['is_current'] = 1
+            row_dict['version_no'] = 1
+            rows_to_insert.append(row_dict)
+            continue
+
+        if existing.get('record_hash') == new_hash:
+            unchanged_rows += 1
+            continue
+
+        rows_to_expire.append(
+            {
+                "product_id": int(existing['product_id']),
+                "end_ts": new_start,
+            }
+        )
+
+        row_dict = row.to_dict()
+        row_dict['ten_san_pham'] = product_key
+        row_dict['date_key'] = normalize_date_key(row_dict.get('date_key'))
+        row_dict['ngay_crawl'] = new_start
+        row_dict['effective_start'] = new_start
+        row_dict['effective_end'] = None
+        row_dict['is_current'] = 1
+        row_dict['version_no'] = int(existing.get('version_no') or 1) + 1
+        rows_to_insert.append(row_dict)
+
+    return rows_to_insert, rows_to_expire, unchanged_rows
 
 # ============================================
 # LOAD TO DIMENSION TABLE
@@ -370,101 +674,105 @@ def load_to_dim():
     print("BƯỚC 4: LOAD - Nạp dữ liệu vào dim_product")
     print("="*60)
     engine = create_mysql_engine()
-    
+
     with engine.begin() as conn:
-        # Lấy danh sách tất cả các cột từ stg_products
-        result = conn.execute(text("""
-            SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = 'datawarehouse' 
-            AND TABLE_NAME = 'stg_products'
-            ORDER BY ORDINAL_POSITION
-        """))
-        
-        columns_info = result.fetchall()
+        result = conn.execute(
+            text(
+                """
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = :schema
+                  AND TABLE_NAME = 'stg_products'
+                ORDER BY ORDINAL_POSITION
+            """
+            ),
+            {"schema": MYSQL_DB},
+        )
+        columns_info = [tuple(row) for row in result.fetchall()]
         if not columns_info:
             print(" ❌ Không tìm thấy bảng stg_products")
-            return 0
-        
-        # Xây dựng câu lệnh CREATE TABLE với tất cả các cột từ stg_products
-        # Thêm product_id làm PRIMARY KEY
-        column_definitions = ["product_id INT AUTO_INCREMENT PRIMARY KEY"]
-        
-        for col_name, data_type, max_length in columns_info:
-            # Luôn escape tên cột với backtick để tránh lỗi với tên đặc biệt
-            col_name_escaped = f"`{col_name}`"
-            
-            # Chuyển đổi kiểu dữ liệu phù hợp
-            if data_type == 'text':
-                col_def = f"{col_name_escaped} TEXT"
-            elif data_type == 'varchar':
-                length = f"({max_length})" if max_length else "(255)"
-                col_def = f"{col_name_escaped} VARCHAR{length}"
-            elif data_type == 'datetime':
-                col_def = f"{col_name_escaped} DATETIME"
-            elif data_type == 'int':
-                col_def = f"{col_name_escaped} INT"
-            elif data_type == 'decimal':
-                col_def = f"{col_name_escaped} DECIMAL(10,2)"
-            else:
-                col_def = f"{col_name_escaped} {data_type.upper()}"
-            
-            column_definitions.append(col_def)
-        
-        # Drop và tạo lại bảng để đảm bảo cấu trúc đúng
-        # (Vì CREATE TABLE IF NOT EXISTS không thay đổi cấu trúc nếu bảng đã tồn tại)
-        conn.execute(text("DROP TABLE IF EXISTS dim_product"))
-        
-        # Tạo bảng dim_product với tất cả các cột giống stg_products
-        create_table_sql = f"""
-            CREATE TABLE dim_product (
-                {', '.join(column_definitions)}
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
-        """
-        
-        conn.execute(text(create_table_sql))
-        print("   ✓ Đã tạo bảng dim_product với tất cả các cột từ stg_products")
-        
-        # Không cần TRUNCATE vì đã DROP và tạo lại bảng
-        
-        # Lấy danh sách tất cả các cột (trừ product_id vì là AUTO_INCREMENT)
-        # Luôn escape tất cả tên cột với backtick
-        all_columns = [f"`{col[0]}`" for col in columns_info]
-        columns_str = ', '.join(all_columns)
-        
-        # Insert toàn bộ dữ liệu từ stg_products sang dim_product
-        insert_sql = f"""
-            INSERT INTO dim_product ({columns_str})
-            SELECT {columns_str}
-            FROM stg_products
-        """
-        
-        result = conn.execute(text(insert_sql))
-        inserted_count = result.rowcount
-        
-        # Thêm UNIQUE constraint cho ten_san_pham nếu chưa có
-        try:
-            # Kiểm tra xem constraint đã tồn tại chưa
-            check_constraint = conn.execute(text("""
-                SELECT COUNT(*) 
-                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS 
-                WHERE TABLE_SCHEMA = 'datawarehouse' 
-                AND TABLE_NAME = 'dim_product' 
-                AND CONSTRAINT_NAME = 'unique_product'
-            """))
-            
-            if check_constraint.scalar() == 0:
-                conn.execute(text("""
-                    ALTER TABLE dim_product 
-                    ADD UNIQUE KEY unique_product (ten_san_pham)
-                """))
-                print("   ✓ Đã thêm UNIQUE constraint cho ten_san_pham")
-        except Exception as e:
-            # Nếu constraint đã tồn tại hoặc có lỗi, bỏ qua
-            print(f"   ⚠️  Không thể thêm UNIQUE constraint: {e}")
-    
-    print(f" ✅ Đã load {inserted_count} dòng vào dim_product (toàn bộ dữ liệu từ stg_products)")
-    return inserted_count
+            return 0, 0
+
+        dim_columns_order = ensure_dim_product_structure(conn, columns_info)
+
+    stg_df = build_staging_snapshot(engine)
+    if stg_df.empty:
+        print(" ⚠️ stg_products đang trống, bỏ qua load dim_product.")
+        return 0, 0
+
+    current_lookup, _ = fetch_current_dim_lookup(engine)
+    rows_to_insert, rows_to_expire, unchanged_rows = detect_dim_changes(stg_df, current_lookup)
+
+    if not rows_to_insert and not rows_to_expire:
+        print(" ✅ dim_product không có thay đổi mới.")
+        return 0, 0
+
+    with engine.begin() as conn:
+        if rows_to_expire:
+            conn.execute(
+                text("""
+                    UPDATE dim_product
+                    SET is_current = 0,
+                        effective_end = :end_ts
+                    WHERE product_id = :product_id
+                """),
+                rows_to_expire,
+            )
+
+        if rows_to_insert:
+            insert_df = pd.DataFrame(rows_to_insert)
+            for col in dim_columns_order:
+                if col not in insert_df.columns:
+                    insert_df[col] = None
+            insert_df = insert_df[dim_columns_order]
+            insert_df.to_sql('dim_product', conn, if_exists='append', index=False, chunksize=500)
+
+    inserted_count = len(rows_to_insert)
+    updated_count = len(rows_to_expire)
+    print(f" ✅ Đã áp dụng SCD Type 2 cho dim_product – inserted: {inserted_count}, expired: {updated_count}, unchanged: {unchanged_rows}")
+    return inserted_count, updated_count
+
+
+def compare_staging_with_dim(target_date=None, sample_size=5):
+    """
+    So sánh dữ liệu mới nhất tại stg_products với dim_product (ngày cũ).
+    """
+    print("\n" + "="*60)
+    print("SO SÁNH STG_PRODUCTS ↔ DIM_PRODUCT")
+    print("="*60)
+    engine = create_mysql_engine()
+    stg_snapshot = build_staging_snapshot(engine, target_date=target_date)
+    if stg_snapshot.empty:
+        print(" ⚠️ Không có dữ liệu trong stg_products với điều kiện yêu cầu.")
+        return {"total_stg": 0, "new_records": 0, "changed_records": 0}
+
+    current_lookup, dim_current = fetch_current_dim_lookup(engine)
+    rows_to_insert, rows_to_expire, unchanged_rows = detect_dim_changes(stg_snapshot, current_lookup)
+
+    summary = {
+        "total_stg": len(stg_snapshot),
+        "dim_current": len(dim_current),
+        "new_records": len([r for r in rows_to_insert if r['version_no'] == 1]),
+        "changed_records": len(rows_to_insert) - len([r for r in rows_to_insert if r['version_no'] == 1]),
+        "expire_candidates": len(rows_to_expire),
+        "unchanged": unchanged_rows,
+    }
+
+    print(f" 📌 Tổng dòng stg: {summary['total_stg']}")
+    print(f" 📌 Số bản ghi dim hiện tại: {summary['dim_current']}")
+    print(f" ➕ Bản ghi mới hoàn toàn: {summary['new_records']}")
+    print(f" 🔁 Bản ghi cần cập nhật phiên bản: {summary['changed_records']}")
+    print(f" 💤 Bản ghi giữ nguyên: {summary['unchanged']}")
+
+    if rows_to_insert:
+        sample_df = pd.DataFrame(rows_to_insert[:sample_size])
+        cols_to_show = [col for col in ['ten_san_pham', 'sale_price_vnd', 'brand', 'ngay_crawl', 'version_no'] if col in sample_df.columns]
+        print("\n Ví dụ bản ghi sẽ được nạp/ cập nhật:")
+        print(sample_df[cols_to_show].to_string(index=False))
+    else:
+        print("\n ✅ Không có sự khác biệt giữa ngày mới và dữ liệu dim hiện tại.")
+
+    return summary
 
 
 # ============================================
@@ -480,19 +788,22 @@ def sync_date_key_and_dim(rebuild_dim=True):
         stg_count = conn.execute(text("SELECT COUNT(*) FROM stg_products")).scalar()
         if stg_count == 0:
             print(" ⚠️ stg_products đang trống, bỏ qua đồng bộ date_key.")
-            return 0
+            return 0, 0
 
         date_count = conn.execute(text("SELECT COUNT(*) FROM date_dims")).scalar()
         if date_count == 0:
             raise ValueError("Bảng date_dims không có dữ liệu, không thể map date_key.")
 
-        has_ngay = conn.execute(text("""
-            SELECT COUNT(*) 
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = 'datawarehouse'
-              AND TABLE_NAME = 'stg_products'
-              AND COLUMN_NAME = 'ngay_crawl'
-        """)).scalar()
+        has_ngay = conn.execute(
+            text("""
+                SELECT COUNT(*) 
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = :schema
+                  AND TABLE_NAME = 'stg_products'
+                  AND COLUMN_NAME = 'ngay_crawl'
+            """),
+            {"schema": MYSQL_DB},
+        ).scalar()
 
         if has_ngay == 0:
             raise KeyError("Không tìm thấy cột 'ngay_crawl' trong stg_products.")
@@ -520,12 +831,12 @@ def sync_date_key_and_dim(rebuild_dim=True):
         print(" 🔄 Đang rebuild dim_product sau khi cập nhật date_key...")
         return load_to_dim()
 
-    return 0
+    return 0, 0
 
 # ============================================
 # MAIN ETL PROCESS
 # ============================================
-def run_etl():
+def run_etl(simulated_date=None, stage_only=False, auto_compare=False):
     print("BẮT ĐẦU QUY TRÌNH ETL: JSON → GENERAL → STG_PRODUCTS → DIM_PRODUCT")
     etl_id, batch_id = start_etl_log()
     try:
@@ -537,12 +848,25 @@ def run_etl():
         if len(df) == 0:
             print("  Không có dữ liệu để xử lý!")
             return
-        df_clean = transform_data(df)
+        df_clean = transform_data(df, simulated_date=simulated_date)
         inserted_stg = load_to_staging(df_clean)
-        inserted_dim = sync_date_key_and_dim(rebuild_dim=True)
-        update_success_log(etl_id, inserted_stg)
+
+        if stage_only:
+            print(" ⏸️ Đã dừng theo yêu cầu sau bước load stg_products.")
+            if auto_compare:
+                compare_staging_with_dim(target_date=simulated_date)
+            update_success_log(etl_id, 0, 0)
+            return
+
+        inserted_dim, updated_dim = sync_date_key_and_dim(rebuild_dim=True)
+        update_success_log(etl_id, inserted_dim, updated_dim)
         print("\nETL HOÀN TẤT THÀNH CÔNG!")
-        print(f"  • Batch ID: {batch_id}\n  • Dòng đã xử lý (staging): {inserted_stg}\n  • Dòng nạp vào dim: {inserted_dim}\n  • Trạng thái: SUCCESS")
+        print(
+            f"  • Batch ID: {batch_id}"
+            f"\n  • Dòng đã xử lý (staging): {inserted_stg}"
+            f"\n  • Dim_product - bản ghi mới: {inserted_dim}, bản ghi đóng: {updated_dim}"
+            f"\n  • Trạng thái: SUCCESS"
+        )
     except Exception as e:
         print("❌ ETL THẤT BẠI!")
         print(f" Lỗi: {e}")
