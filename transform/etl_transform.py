@@ -3,364 +3,404 @@ import re
 from datetime import datetime
 import pandas as pd
 from sqlalchemy import create_engine, text
-from config.db_config import get_mysql_url
-
 
 # ============================================
-# MYSQL ENGINE
+# MYSQL CONNECTION
 # ============================================
+def get_mysql_url():
+    return "mysql+pymysql://root:@localhost:3306/datawarehouse?charset=utf8mb4"
+
 def create_mysql_engine():
-    """Tạo MySQL engine với UTF-8 encoding"""
-    url = get_mysql_url()
-    # Thêm charset vào URL
-    if '?' in url:
-        url += '&charset=utf8mb4'
-    else:
-        url += '?charset=utf8mb4'
-    return create_engine(url, pool_pre_ping=True, connect_args={"charset": "utf8mb4"})
-
+    return create_engine(get_mysql_url(), pool_pre_ping=True)
 
 # ============================================
 # ETL LOG FUNCTIONS
 # ============================================
-def check_running_etl():
-    """Kiểm tra ETL đang chạy"""
-    engine = create_mysql_engine()
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT * FROM etl_log WHERE status='running' LIMIT 1"))
-        row = result.fetchone()
-        if row:
-            print(f"🔄 Found running ETL batch: {row[0]}. Reusing it.")
-            return row[0]
-        return None
-
-
 def start_etl_log():
-    """Bắt đầu ETL log mới"""
     engine = create_mysql_engine()
-    with engine.begin() as conn:
-        result = conn.execute(text("""
-                                   INSERT INTO etl_log (batch_id, source_table, target_table, status)
-                                   VALUES (:batch_id, :source_table, :target_table, 'running')
-                                   """), {
-                                  "batch_id": f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                                  "source_table": "stg_products",
-                                  "target_table": "dim_*"
-                              })
-        etl_id = result.lastrowid
-    print(f" Started new ETL batch: {etl_id}")
-    return etl_id
+    batch_id = f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS etl_log (
+                    etl_id INT AUTO_INCREMENT PRIMARY KEY,
+                    batch_id VARCHAR(255),
+                    status VARCHAR(50),
+                    error_msg TEXT,
+                    records_inserted INT DEFAULT 0,
+                    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    end_time DATETIME
+                )
+            """))
+            conn.execute(text("INSERT INTO etl_log (batch_id, status) VALUES (:batch_id, 'running')"), {"batch_id": batch_id})
+            res_id = conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
+        print(f" Bắt đầu ETL batch: {batch_id} (ID: {res_id})")
+        return res_id, batch_id
+    except Exception as e:
+        print(f" Không thể ghi log: {e}")
+        return None, batch_id
 
-
-def update_etl_log(etl_id, inserted=0, updated=0, skipped=0, status="running", error_msg=None):
-    """Cập nhật ETL log"""
+def update_error_log(etl_id, error_msg):
+    if not etl_id:
+        return
     engine = create_mysql_engine()
     with engine.begin() as conn:
         conn.execute(text("""
-                          UPDATE etl_log
-                          SET records_inserted=:inserted,
-                              records_updated=:updated,
-                              records_skipped=:skipped,
-                              status=:status,
-                              end_time=IF(:status <> 'running', NOW(), NULL)
-                          WHERE etl_id = :etl_id
-                          """), {
-                         "inserted": inserted,
-                         "updated": updated,
-                         "skipped": skipped,
-                         "status": status,
-                         "etl_id": etl_id
-                     })
+            UPDATE etl_log
+            SET status='failed',
+                error_msg=:msg,
+                end_time=NOW()
+            WHERE etl_id = :id
+        """), {"msg": str(error_msg), "id": etl_id})
 
-
-# ============================================
-# EXTRACT - Load JSON
-# ============================================
-def load_json(path="cellphoneS.json"):
-    """Load dữ liệu từ JSON file"""
-    print("\n" + "=" * 60)
-    print("BƯỚC 1: EXTRACT - Load JSON Data")
-    print("=" * 60)
-
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    df = pd.DataFrame(data)
-    print(f" Loaded {len(df)} records from {path}")
-
-    return df
-
+def update_success_log(etl_id, inserted_count):
+    if not etl_id:
+        return
+    engine = create_mysql_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE etl_log
+            SET status='success',
+                records_inserted=:cnt,
+                end_time=NOW()
+            WHERE etl_id = :id
+        """), {"cnt": inserted_count, "id": etl_id})
+    print(f" Đã cập nhật Log: Success (Inserted: {inserted_count})")
 
 # ============================================
-# TRANSFORM - Data Cleaning & Normalization
+# EXTRACT
+# ============================================
+def extract_from_general():
+    print("\n" + "="*60)
+    print("BƯỚC 1: EXTRACT - Đọc dữ liệu từ bảng general")
+    print("="*60)
+    engine = create_mysql_engine()
+    try:
+        query = "SELECT * FROM general"
+        df = pd.read_sql(query, engine)
+        print(f" Đã đọc {len(df)} dòng từ bảng general")
+        return df
+    except Exception as e:
+        print(f" Lỗi khi đọc dữ liệu: {e}")
+        raise
+
+# ============================================
+# TRANSFORM
 # ============================================
 def transform_data(df):
-    """Transform dữ liệu theo chuẩn ETL"""
-    print("\n" + "=" * 60)
-    print("BƯỚC 2: TRANSFORM - Clean & Normalize Data")
-    print("=" * 60)
-
+    print("\n" + "="*60)
+    print("BƯỚC 2: TRANSFORM - Làm sạch và chuẩn hóa dữ liệu")
+    print("="*60)
     df = df.copy()
+
+    # Lọc dữ liệu rác
     initial_count = len(df)
+    df = df.dropna(subset=['Tên sản phẩm'])
+    df = df[df['Tên sản phẩm'] != 'Không tìm thấy']
+    df = df[df['Tên sản phẩm'].astype(str).str.strip() != '']
+    print(f" 🔍 Loại bỏ {initial_count - len(df)} dòng dữ liệu rác")
 
-    # 2.1: DATA QUALITY - Loại bỏ records không hợp lệ
-    invalid_mask = (
-            (df['Tên sản phẩm'] == 'Không tìm thấy') |
-            (df['Giá'] == 'Không tìm thấy') |
-            (df['Tên sản phẩm'].isna())
-    )
-    invalid_count = invalid_mask.sum()
-    df = df[~invalid_mask].copy()
-    print(f" Removed {invalid_count} invalid records")
-    print(f" Valid records: {len(df)}")
+    # Rename các cột chính sang snake_case
+    df.rename(columns={
+        'Tên sản phẩm': 'ten_san_pham',
+        'Giá': 'sale_price_vnd',
+        'Nguồn': 'nguon'
+    }, inplace=True)
 
-    # 2.2: Loại bỏ duplicates
-    before_dedup = len(df)
-    df = df.drop_duplicates(subset=["URL"], keep="first")
-    dup_count = before_dedup - len(df)
-    print(f" Removed {dup_count} duplicate URLs")
-    print(f" Unique records: {len(df)}")
+    # Trích xuất Brand từ tên sản phẩm
+    brands_dict = {
+        'IPHONE': 'Apple',
+        'SAMSUNG': 'Samsung',
+        'XIAOMI': 'Xiaomi',
+        'OPPO': 'Oppo',
+        'REALME': 'Realme',
+        'VIVO': 'Vivo',
+        'NOKIA': 'Nokia',
+        'TECNO': 'Tecno',
+        'HONOR': 'Honor',
+        'SONY': 'Sony',
+        'ASUS': 'Asus',
+        'INFINIX': 'Infinix',
+        'POCO': 'Xiaomi',
+        'NOTHING': 'Nothing',
+        'NUBIA': 'Nubia',
+        'GOOGLE': 'Google',
+        'VSMART': 'Vsmart'
+    }
+    
+    def extract_brand(name):
+        if pd.isna(name) or name == 'nan' or str(name).strip() == '':
+            return 'Other'
+        n = str(name).upper()
+        for k, v in brands_dict.items():
+            if k in n:
+                return v
+        return 'Other'
+    
+    df['brand'] = df['ten_san_pham'].apply(extract_brand)
 
-    # 2.3: EXTRACT BRAND
-
-    def extract_brand(product_name):
-        if pd.isna(product_name):
-            return 'Unknown'
-
-        brands = [
-            'Samsung', 'iPhone', 'Xiaomi', 'OPPO', 'Realme',
-            'Vivo', 'Nokia', 'TECNO', 'Itel', 'Masstel',
-            'HONOR', 'Nothing', 'Sony', 'Google', 'OnePlus',
-            'ASUS', 'Nubia', 'ZTE', 'Motorola', 'Lenovo',
-            'Huawei', 'POCO', 'Tecno'
-        ]
-
-        product_upper = str(product_name).upper()
-        for brand in brands:
-            if brand.upper() in product_upper:
-                return brand
-
-        return 'Unknown'
-
-    df['Brand'] = df['Tên sản phẩm'].apply(extract_brand)
-    brand_counts = df['Brand'].value_counts()
-    print(f" Extracted brands: {df['Brand'].nunique()} unique brands")
-    print(f" Top brands: {', '.join(brand_counts.head(5).index.tolist())}")
-
-    # 2.4: EXTRACT CATEGORY
-    print("\n Step 2.4: Extract Category")
-
-    def categorize_product(row):
-        name = str(row.get('Tên sản phẩm', '')).upper()
-
-        # Foldable phones
-        if any(x in name for x in ['FOLD', 'FLIP', 'MAGIC V']):
+    # Phân loại Category
+    def categorize(name):
+        if pd.isna(name) or name == 'nan' or str(name).strip() == '':
+            return 'Smartphone'
+        n = str(name).upper()
+        if any(x in n for x in ['FOLD', 'FLIP', 'GALAXY Z']):
             return 'Foldable'
-
-        # Gaming phones
-        if any(x in name for x in ['ROG', 'BLACK SHARK', 'LEGION', 'RED MAGIC']):
-            return 'Gaming'
-
-        # Default category
+        if 'TAB' in n or 'IPAD' in n:
+            return 'Tablet'
         return 'Smartphone'
+    
+    df['category'] = df['ten_san_pham'].apply(categorize)
 
-    df['Category'] = df.apply(categorize_product, axis=1)
-    cat_counts = df['Category'].value_counts()
-    print(f" Categorized: {df['Category'].nunique()} categories")
-    print(f" Categories: {cat_counts.to_dict()}")
+    # Metadata - Thêm thông tin ngày crawl (DATETIME)
+    df['ngay_crawl'] = datetime.now()
+    df['date_key'] = datetime.now().strftime("%Y%m%d")
+    
+    # Xử lý nguồn dữ liệu (VARCHAR)
+    df['nguon'] = df['nguon'].fillna('CellphoneS')
+    df['nguon'] = df['nguon'].astype(str).str.strip()
 
-    # 2.5: NORMALIZE PRICE
+    # Xử lý giá - giữ nguyên format TEXT (vì có ký tự đặc biệt ₫, đ)
+    df['sale_price_vnd'] = df['sale_price_vnd'].astype(str)
+    df['sale_price_vnd'] = df['sale_price_vnd'].replace('nan', None)
+    df['sale_price_vnd'] = df['sale_price_vnd'].replace('None', None)
 
-    def parse_price(price_text):
-        if pd.isna(price_text):
-            return None
-
-        price_text = str(price_text).strip()
-
-        # Case: "Liên hệ để báo giá"
-        if 'liên hệ' in price_text.lower():
-            return None
-
-        # Extract số: "7.990.000đ" → 7990000
-        numbers = re.findall(r'[\d.]+', price_text)
-        if numbers:
-            price_str = numbers[0].replace('.', '')
-            try:
-                return float(price_str)
-            except:
-                return None
-
-        return None
-
-    df['sale_price_vnd'] = df['Giá'].apply(parse_price)
-    valid_prices = df['sale_price_vnd'].notna().sum()
-    print(f" Parsed {valid_prices}/{len(df)} prices")
-    if valid_prices > 0:
-        print(f" Price range: {df['sale_price_vnd'].min():,.0f} - {df['sale_price_vnd'].max():,.0f} VND")
-        print(f" Average price: {df['sale_price_vnd'].mean():,.0f} VND")
-
-    # 2.6: ADD METADATA
-    df['Nguồn'] = df.get('Nguồn', 'CellphoneS').fillna('CellphoneS')
-    df['Ngày_crawl'] = pd.to_datetime(df.get('Ngày_crawl', datetime.now()))
-
-    # Generate product_key
-    df['product_key'] = range(1, len(df) + 1)
-
-    print(f" Added metadata columns")
-    print(f" Crawl date: {df['Ngày_crawl'].iloc[0]}")
-
-    # 2.7: BUILD DIMENSION TABLES
-    print("\n Step 2.7: Build Dimension Tables")
-
-    # dim_date
-    dim_date = pd.DataFrame({
-        "date_key": df["Ngày_crawl"].dt.strftime("%Y%m%d").astype(int),
-        "date": df["Ngày_crawl"],
-        "year": df["Ngày_crawl"].dt.year,
-        "month": df["Ngày_crawl"].dt.month,
-        "day": df["Ngày_crawl"].dt.day
-    }).drop_duplicates()
-    print(f" dim_date: {len(dim_date)} records")
-
-    # dim_source
-    dim_source = pd.DataFrame({
-        "source_key": range(1, df["Nguồn"].nunique() + 1),
-        "source_name": df["Nguồn"].unique()
-    })
-    print(f" dim_source: {len(dim_source)} records")
-
-    # dim_category
-    dim_category = pd.DataFrame({
-        "category_key": range(1, df["Category"].nunique() + 1),
-        "category_name": df["Category"].unique()
-    })
-    print(f" dim_category: {len(dim_category)} records")
-
-    # dim_brand
-    dim_brand = pd.DataFrame({
-        "brand_key": range(1, df["Brand"].nunique() + 1),
-        "brand_name": df["Brand"].unique()
-    })
-    print(f" dim_brand: {len(dim_brand)} records")
-
-    print("\n" + "=" * 60)
-    print(" TRANSFORM COMPLETED!")
-    print(f" Summary: {initial_count} → {len(df)} records (removed {initial_count - len(df)})")
-    print("=" * 60)
-
-    return df, dim_date, dim_source, dim_category, dim_brand
-
-
-# ============================================
-# LOAD - Load to MySQL
-# ============================================
-def load_to_mysql(df, table_name, if_exists='replace'):
-    """Load DataFrame vào MySQL với UTF-8 encoding"""
-    print(f"\n Loading {len(df)} records to table: {table_name}")
-
-    engine = create_mysql_engine()
-
-    try:
-        # Đảm bảo tất cả string columns là UTF-8
-        for col in df.select_dtypes(include=['object']).columns:
+    # ============================================
+    # CHUYỂN ĐỔI KIỂU DỮ LIỆU CHO CÁC CỘT
+    # ============================================
+    
+    # Xử lý tất cả các cột text - chuyển sang string và xử lý NULL
+    # Giữ nguyên format text nhưng chuẩn bị để chuyển đổi kiểu dữ liệu trong SQL
+    for col in df.columns:
+        if col not in ['brand', 'category', 'ngay_crawl', 'date_key']:
+            # Chuyển sang string nhưng giữ NULL values
             df[col] = df[col].astype(str)
+            # Thay thế 'nan' và 'None' thành None (NULL trong SQL)
+            df[col] = df[col].replace(['nan', 'None', 'NaT', '<NA>'], None)
+            # Xử lý các giá trị rỗng
+            df[col] = df[col].apply(lambda x: None if str(x).strip() in ['', 'nan', 'None', 'NaT', '<NA>'] else x)
 
-        # Load to MySQL
-        df.to_sql(table_name, engine, if_exists=if_exists, index=False)
-        print(f" Successfully loaded to {table_name}")
+    # Loại bỏ cột không cần thiết (id và created_at không có trong stg_products)
+    for col in ['id', 'created_at']:
+        if col in df.columns:
+            df.drop(columns=[col], inplace=True)
 
-    except Exception as e:
-        print(f" Error loading to {table_name}: {e}")
-        raise
+    # Đảm bảo thứ tự cột đúng với stg_products (URL đầu tiên)
+    if 'URL' in df.columns:
+        cols = ['URL'] + [c for c in df.columns if c != 'URL']
+        df = df[cols]
 
+    print(f" ✅ Dữ liệu đã làm sạch. Tổng dòng: {len(df)}")
+    print(f" 📊 Số cột sau transform: {len(df.columns)}")
+    print(f" 📋 Các cột: {', '.join(df.columns[:5])}... (tổng {len(df.columns)} cột)")
+    return df
 
 # ============================================
-# MAIN ETL PIPELINE
+# LOAD TO STAGING
 # ============================================
-def run_etl(json_file="cellphoneS.json"):
-    """Main ETL pipeline"""
-
-    print("\n" + "=" * 70)
-    print(" " * 20 + "🚀 ETL PIPELINE START")
-    print("=" * 70)
-
-    # Check running ETL
-    run_id = check_running_etl()
-    if not run_id:
-        run_id = start_etl_log()
-
+def load_to_staging(df):
+    print("\n" + "="*60)
+    print("BƯỚC 3: LOAD - Nạp dữ liệu vào stg_products")
+    print("="*60)
+    engine = create_mysql_engine()
     try:
-        # ========================================
-        # EXTRACT
-        # ========================================
-        df_raw = load_json(json_file)
-
-        # ========================================
-        # TRANSFORM
-        # ========================================
-        df_product, dim_date, dim_source, dim_category, dim_brand = transform_data(df_raw)
-
-        # ========================================
-        # LOAD
-        # ========================================
-        print("\n" + "=" * 60)
-        print("BƯỚC 3: LOAD - Load to MySQL Database")
-        print("=" * 60)
-
-        # Load staging table
-        load_to_mysql(df_product, "stg_products", if_exists='replace')
-
-        # Load dimension tables
-        load_to_mysql(df_product, "dim_product", if_exists='replace')
-        load_to_mysql(dim_date, "dim_date", if_exists='replace')
-        load_to_mysql(dim_source, "dim_source", if_exists='replace')
-        load_to_mysql(dim_category, "dim_category", if_exists='replace')
-        load_to_mysql(dim_brand, "dim_brand", if_exists='replace')
-
-        # ========================================
-        # UPDATE ETL LOG
-        # ========================================
-        update_etl_log(
-            run_id,
-            inserted=len(df_product),
-            updated=0,
-            skipped=0,
-            status="success"
-        )
-
-        print("\n" + "=" * 70)
-        print(" " * 20 + " ETL PIPELINE COMPLETED!")
-        print("=" * 70)
-        print(f"\n📊 ETL Summary:")
-        print(f"   - Batch ID: {run_id}")
-        print(f"   - Records loaded: {len(df_product)}")
-        print(f"   - Brands: {dim_brand['brand_name'].nunique()}")
-        print(f"   - Categories: {dim_category['category_name'].nunique()}")
-        print(f"   - Sources: {dim_source['source_name'].nunique()}")
-        print(f"   - Status: SUCCESS ")
-
+        # Sử dụng pandas to_sql để load dữ liệu
+        df_to_load = df.copy()
+        
+        # Đảm bảo ngay_crawl là datetime object để pandas tự động detect
+        if 'ngay_crawl' in df_to_load.columns:
+            df_to_load['ngay_crawl'] = pd.to_datetime(df_to_load['ngay_crawl'], errors='coerce')
+        
+        # Load vào staging (pandas sẽ tự động tạo bảng với kiểu dữ liệu TEXT)
+        df_to_load.to_sql('stg_products', engine, if_exists='replace', index=False, chunksize=1000)
+        
+        # Cập nhật kiểu dữ liệu sau khi load (ALTER TABLE)
+        print(" 🔄 Đang chuyển đổi kiểu dữ liệu...")
+        with engine.begin() as conn:
+            # Cập nhật ngay_crawl thành DATETIME
+            if 'ngay_crawl' in df.columns:
+                try:
+                    conn.execute(text("""
+                        ALTER TABLE stg_products 
+                        MODIFY COLUMN ngay_crawl DATETIME NULL
+                    """))
+                    print("   ✓ ngay_crawl -> DATETIME")
+                except Exception as e:
+                    print(f"   ⚠️  Không thể chuyển ngay_crawl sang DATETIME: {e}")
+            
+            # Cập nhật các cột VARCHAR (text ngắn)
+            varchar_updates = {
+                'nguon': 'VARCHAR(100)',
+                'brand': 'VARCHAR(50)',
+                'category': 'VARCHAR(50)',
+                'date_key': 'VARCHAR(8)',
+                'sale_price_vnd': 'VARCHAR(50)',
+                'ten_san_pham': 'VARCHAR(255)',
+                'Công nghệ NFC': 'VARCHAR(10)',
+                'Hỗ trợ mạng': 'VARCHAR(10)',
+                'Cổng sạc': 'VARCHAR(20)',
+                'Hệ điều hành': 'VARCHAR(50)',
+                'Chỉ số kháng nước, bụi': 'VARCHAR(10)',
+                'Cảm biến vân tay': 'VARCHAR(50)',
+                'Wi-Fi': 'VARCHAR(20)',
+                'Bluetooth': 'VARCHAR(10)',
+                'Thẻ SIM': 'VARCHAR(50)',
+                'Loại CPU': 'VARCHAR(50)'
+            }
+            
+            for col, dtype in varchar_updates.items():
+                if col in df.columns:
+                    try:
+                        # Sử dụng backtick cho tên cột có dấu cách hoặc ký tự đặc biệt
+                        col_name = f"`{col}`" if ' ' in col or '-' in col else col
+                        conn.execute(text(f"""
+                            ALTER TABLE stg_products 
+                            MODIFY COLUMN {col_name} {dtype} NULL
+                        """))
+                        print(f"   ✓ {col} -> {dtype}")
+                    except Exception as e:
+                        print(f"   ⚠️  Không thể chuyển {col} sang {dtype}: {e}")
+            
+            # Các cột còn lại giữ nguyên TEXT (URL, mô tả dài, thông số kỹ thuật)
+            print("   ✓ Các cột khác giữ nguyên TEXT")
+        
+        print(f" ✅ Đã load {len(df)} dòng vào bảng 'stg_products' với kiểu dữ liệu phù hợp")
+        return len(df)
     except Exception as e:
-        # Update log as failed
-        update_etl_log(run_id, status="failed")
-
-        print("\n" + "=" * 70)
-        print(" " * 20 + " ETL PIPELINE FAILED!")
-        print("=" * 70)
-        print(f"Error: {e}")
-
-        import traceback
-        print("Traceback:")
-        print(traceback.format_exc())
-
+        print(f" ❌ Lỗi load vào staging: {e}")
         raise
 
+# ============================================
+# LOAD TO DIMENSION TABLE
+# ============================================
+def load_to_dim():
+    print("\n" + "="*60)
+    print("BƯỚC 4: LOAD - Nạp dữ liệu vào dim_product")
+    print("="*60)
+    engine = create_mysql_engine()
+    
+    with engine.begin() as conn:
+        # Lấy danh sách tất cả các cột từ stg_products
+        result = conn.execute(text("""
+            SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'datawarehouse' 
+            AND TABLE_NAME = 'stg_products'
+            ORDER BY ORDINAL_POSITION
+        """))
+        
+        columns_info = result.fetchall()
+        if not columns_info:
+            print(" ❌ Không tìm thấy bảng stg_products")
+            return 0
+        
+        # Xây dựng câu lệnh CREATE TABLE với tất cả các cột từ stg_products
+        # Thêm product_id làm PRIMARY KEY
+        column_definitions = ["product_id INT AUTO_INCREMENT PRIMARY KEY"]
+        
+        for col_name, data_type, max_length in columns_info:
+            col_name_escaped = f"`{col_name}`" if ' ' in col_name or '-' in col_name else col_name
+            
+            # Chuyển đổi kiểu dữ liệu phù hợp
+            if data_type == 'text':
+                col_def = f"{col_name_escaped} TEXT"
+            elif data_type == 'varchar':
+                length = f"({max_length})" if max_length else "(255)"
+                col_def = f"{col_name_escaped} VARCHAR{length}"
+            elif data_type == 'datetime':
+                col_def = f"{col_name_escaped} DATETIME"
+            elif data_type == 'int':
+                col_def = f"{col_name_escaped} INT"
+            elif data_type == 'decimal':
+                col_def = f"{col_name_escaped} DECIMAL(10,2)"
+            else:
+                col_def = f"{col_name_escaped} {data_type.upper()}"
+            
+            column_definitions.append(col_def)
+        
+        # Tạo bảng dim_product với tất cả các cột giống stg_products
+        create_table_sql = f"""
+            CREATE TABLE IF NOT EXISTS dim_product (
+                {', '.join(column_definitions)}
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+        """
+        
+        conn.execute(text(create_table_sql))
+        print("   ✓ Đã tạo/cập nhật bảng dim_product với tất cả các cột từ stg_products")
+        
+        # Xóa dữ liệu cũ (nếu muốn replace hoàn toàn)
+        # Hoặc có thể dùng TRUNCATE hoặc DELETE
+        conn.execute(text("TRUNCATE TABLE dim_product"))
+        print("   ✓ Đã xóa dữ liệu cũ trong dim_product")
+        
+        # Lấy danh sách tất cả các cột (trừ product_id vì là AUTO_INCREMENT)
+        all_columns = [f"`{col[0]}`" if ' ' in col[0] or '-' in col[0] else col[0] 
+                      for col in columns_info]
+        columns_str = ', '.join(all_columns)
+        
+        # Insert toàn bộ dữ liệu từ stg_products sang dim_product
+        insert_sql = f"""
+            INSERT INTO dim_product ({columns_str})
+            SELECT {columns_str}
+            FROM stg_products
+        """
+        
+        result = conn.execute(text(insert_sql))
+        inserted_count = result.rowcount
+        
+        # Thêm UNIQUE constraint cho ten_san_pham nếu chưa có
+        try:
+            # Kiểm tra xem constraint đã tồn tại chưa
+            check_constraint = conn.execute(text("""
+                SELECT COUNT(*) 
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS 
+                WHERE TABLE_SCHEMA = 'datawarehouse' 
+                AND TABLE_NAME = 'dim_product' 
+                AND CONSTRAINT_NAME = 'unique_product'
+            """))
+            
+            if check_constraint.scalar() == 0:
+                conn.execute(text("""
+                    ALTER TABLE dim_product 
+                    ADD UNIQUE KEY unique_product (ten_san_pham)
+                """))
+                print("   ✓ Đã thêm UNIQUE constraint cho ten_san_pham")
+        except Exception as e:
+            # Nếu constraint đã tồn tại hoặc có lỗi, bỏ qua
+            print(f"   ⚠️  Không thể thêm UNIQUE constraint: {e}")
+    
+    print(f" ✅ Đã load {inserted_count} dòng vào dim_product (toàn bộ dữ liệu từ stg_products)")
+    return inserted_count
 
 # ============================================
-# USAGE
+# MAIN ETL PROCESS
+# ============================================
+def run_etl():
+    print("BẮT ĐẦU QUY TRÌNH ETL: GENERAL → STG_PRODUCTS → DIM_PRODUCT")
+    etl_id, batch_id = start_etl_log()
+    try:
+        df = extract_from_general()
+        if len(df) == 0:
+            print("  Không có dữ liệu để xử lý!")
+            return
+        df_clean = transform_data(df)
+        inserted_stg = load_to_staging(df_clean)
+        inserted_dim = load_to_dim()
+        update_success_log(etl_id, inserted_stg)
+        print("\nETL HOÀN TẤT THÀNH CÔNG!")
+        print(f"  • Batch ID: {batch_id}\n  • Dòng đã xử lý (staging): {inserted_stg}\n  • Dòng nạp vào dim: {inserted_dim}\n  • Trạng thái: SUCCESS")
+    except Exception as e:
+        print("❌ ETL THẤT BẠI!")
+        print(f" Lỗi: {e}")
+        update_error_log(etl_id, str(e))
+        raise
+
+# ============================================
+# ENTRY POINT
 # ============================================
 if __name__ == "__main__":
-    # Chạy ETL với file JSON
-    run_etl("../crawed/cellphoneS.json")
-
-    # Hoặc với file khác:
-    # run_etl("path/to/your/products.json")
+    try:
+        run_etl()
+    except Exception as e:
+        print(f"\nChương trình kết thúc với lỗi: {e}")
+        exit(1)
