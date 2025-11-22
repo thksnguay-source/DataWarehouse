@@ -2,7 +2,7 @@ import json
 from sqlalchemy import create_engine, text
 from config.db_config import get_mysql_url
 
-# JSON key -> Tên cột DB (có dấu)
+
 field_map = {
     "Tên sản phẩm": "Tên sản phẩm",
     "Giá": "Giá",
@@ -65,7 +65,7 @@ def etl_process(file_list):
     data = load_multiple_json(file_list)
     insert_data_simple(data)
 
-# --- Main ---
+#--- Main ---
 if __name__ == "__main__":
     files = ["cellphones.json", "thegioididong.json"]
     etl_process(files)
