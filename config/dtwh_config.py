@@ -13,7 +13,8 @@ DB_CONFIG = {
 
 # Tên các database
 DB_DATAWH = 'datawh'
-DB_STAGING = 'staging'
+DB_STAGING = 'newstaging'
+DB_CONTROL = 'crawl_controller'
 
 # Cấu hình các Dimension: Key là Surrogate Key (SK) mới
 # (Tên DIM, DB Nguồn (Staging), Surrogate Key (SK))
@@ -21,4 +22,6 @@ DIMENSION_CONFIGS = [
     ('dim_brand', DB_STAGING, 'brand_key'),
      ('dim_category', DB_STAGING, 'category_key'),
      ('dim_source', DB_STAGING, 'source_key'),
-     ('dim_product',DB_STAGING, 'product_key')]
+     ('dim_product',DB_STAGING, 'product_id'),
+     ('date_dims',DB_STAGING, 'date_key')
+]
