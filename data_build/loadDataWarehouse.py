@@ -17,11 +17,10 @@ except ImportError:
 
 # --- IMPORT CẤU HÌNH TỪ FILE RIÊNG ---
 try:
-    from config.dtwh_config import DB_CONFIG, DB_DATAWH, DIMENSION_CONFIGS, DB_STAGING
+    from config.dtwh_config import DB_CONFIG, DB_DATAWH, DB_CONTROL, DIMENSION_CONFIGS, DB_STAGING
 except ImportError:
     print("LỖI: Không tìm thấy file config/dtwh_config.py hoặc các biến cần thiết.")
     sys.exit(1)
-
 
 # ======================================================================
 # LỚP CURSOR MỚI: Hỗ trợ next_result() trên C Extension (FIX lỗi _cmysql)
@@ -48,7 +47,7 @@ def get_latest_staging_batch(conn_config):
     # 1.1 Tìm Batch Staging mới nhất đã hoàn thành
     conn_staging = None
     try:
-        conn_staging = mysql.connector.connect(**conn_config, database=DB_STAGING)
+        conn_staging = mysql.connector.connect(**conn_config, database=DB_CONTROL)
         cursor = conn_staging.cursor()
 
         sql_check = f"""
@@ -119,7 +118,6 @@ def run_etl_dimension(conn_datawh, dim_name, source_db, pk_column, batch_id):
             print(f"   -> Kết quả: **INSERTED={inserted}**, **UPDATED={updated}**")
         else:
             print("   -> Cảnh báo: Không nhận được kết quả thống kê (inserted/updated) từ SP.")
-
 
     except mysql.connector.Error as err:
         print(f"   -> LỖI ETL cho {dim_name}: **{err}**")
