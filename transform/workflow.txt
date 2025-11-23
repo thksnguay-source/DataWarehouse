@@ -1,0 +1,145 @@
+@startuml
+skinparam activityBackgroundColor White
+skinparam activityBorderColor Black
+skinparam activityDiamondBackgroundColor White
+skinparam activityDiamondBorderColor Black
+skinparam activityStartColor Black
+skinparam activityEndColor Black
+skinparam activityBarColor Black
+skinparam arrowColor Black
+
+title ETL WORKFLOW: GENERAL -> STG_PRODUCTS -> DIM_PRODUCT
+
+start
+
+:1. Khoi tao ETL Process
+Input: simulated_date, batch_id
+Khoi tao control logs;
+
+:2. EXTRACT - Doc du lieu
+Source: general table
+Query: SELECT * FROM general;
+
+if (Co du lieu?) then (Khong)
+  :Thong bao: Khong co du lieu;
+  stop
+else (Co)
+endif
+
+:3. TRANSFORM - Lam sach du lieu
+- Loc du lieu rac
+- Rename columns
+- Extract brand tu ten san pham
+- Phan loai category
+- Parse price -> DECIMAL
+- Them metadata: ngay_crawl, date_key;
+
+if (Transform thanh cong?) then (Khong)
+  #Pink:Log status = FAILED
+  Gui email thong bao loi;
+  stop
+else (Co)
+endif
+
+:Log transform success;
+
+:4. LOAD STAGING
+- Nap vao stg_products
+- ALTER TABLE: Chuyen doi kieu du lieu
+  * ngay_crawl -> DATETIME
+  * sale_price_vnd -> DECIMAL(15,2)
+  * nguon, brand, category -> VARCHAR;
+
+if (Stage_only = True?) then (Co)
+  :Dung ETL sau staging;
+  if (Auto_compare?) then (Co)
+    :Compare staging voi dim_product;
+  endif
+  stop
+else (Khong)
+endif
+
+:5. SYNC DATE_KEY
+- Kiem tra date_dims co du lieu
+- UPDATE stg_products
+  JOIN date_dims;
+
+if (Sync thanh cong?) then (Co missing)
+  #Yellow:Canh bao: Co records thieu date_key;
+endif
+
+:6. Build Staging Snapshot
+- Doc stg_products
+- Loc theo ngay_crawl
+- Tinh record_hash
+- Sort va loai duplicate;
+
+if (Staging snapshot empty?) then (Co)
+  :Khong co du lieu trong stg_products;
+  stop
+else (Khong)
+endif
+
+:7. Fetch Current Dim_Product
+Query: SELECT * FROM dim_product
+WHERE is_current = 1;
+
+:8. Detect Changes (SCD Type 2)
+So sanh staging vs dim hien tai
+- Neu khong ton tai -> INSERT moi
+- Neu record_hash khac -> EXPIRE + INSERT
+- Neu record_hash giong -> SKIP;
+
+:Thong ke:
+- New records
+- Changed records
+- Unchanged
+- To expire;
+
+if (Co thay doi?) then (Khong)
+  :Dim_product khong co thay doi;
+  :Log: status=success;
+else (Co)
+endif
+
+:9. Apply SCD2 - LOAD DIM_PRODUCT
+Transaction BEGIN;
+
+:9.1: Expire old versions
+UPDATE dim_product
+SET is_current = 0,
+    effective_end = new_date
+WHERE product_id IN (expired_ids);
+
+:9.2: Insert new versions
+INSERT INTO dim_product
+VALUES (...);
+
+:Transaction COMMIT;
+
+if (Load dim thanh cong?) then (Khong)
+  #Pink:Transaction ROLLBACK
+  Log: status=failed
+  Gui email thong bao loi;
+  stop
+else (Co)
+endif
+
+:10. Cap nhat Control Logs
+control_log_finish(
+  load_dwh,
+  status=success,
+  inserted=count,
+  updated=count
+);
+
+#LightGreen:ETL HOAN TAT THANH CONG
+Batch ID: batch_id
+- Staging: n records
+- Dim inserted: m records
+- Dim expired: p records
+- Status: SUCCESS;
+
+stop
+
+@enduml
