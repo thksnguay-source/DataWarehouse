@@ -6,7 +6,7 @@ def get_mysql_url() -> str:
     port = "3306"
     user = "root"
     password = ""
-    db = "datawarehouse"
+    db = "staging"
 
     return f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}"
 
