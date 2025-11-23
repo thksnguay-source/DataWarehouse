@@ -29,5 +29,33 @@
       <jdbc-url>jdbc:mysql://172.16.17.10:3306/123</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
+    <data-source source="LOCAL" name="123@172.16.17.10" uuid="83eeca7b-4ae6-48f3-9fc5-7b8c9ebe3b24">
+      <driver-ref>mysql.8</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>com.mysql.cj.jdbc.Driver</jdbc-driver>
+      <jdbc-url>jdbc:mysql://172.16.17.10:3306/123</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
+    <data-source source="LOCAL" name="datawarehouse@1.54.235.85" uuid="be6aebcf-fb9f-4a9c-9d00-653ce45ca0ee">
+      <driver-ref>mysql.8</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>com.mysql.cj.jdbc.Driver</jdbc-driver>
+      <jdbc-url>jdbc:mysql://1.54.235.85:3306/datawarehouse</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
+    <data-source source="LOCAL" name="datawarehouse@1.54.235.85 [2]" uuid="134a95a8-107a-4a1f-80e6-429dbcee8be2">
+      <driver-ref>mysql.8</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>com.mysql.cj.jdbc.Driver</jdbc-driver>
+      <jdbc-url>jdbc:mysql://1.54.235.85:3306/datawarehouse</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
+    <data-source source="LOCAL" name="datawarehouse@1.54.235.85 [3]" uuid="d05b79d2-2fd1-4087-bf64-55ab70c2ef3c">
+      <driver-ref>mysql.8</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>com.mysql.cj.jdbc.Driver</jdbc-driver>
+      <jdbc-url>jdbc:mysql://1.54.235.85:3306/datawarehouse</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
   </component>
 </project>
