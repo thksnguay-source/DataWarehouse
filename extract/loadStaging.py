@@ -17,7 +17,7 @@ field_map = {
     "Sim": "Sim",
     "Hỗ trợ mạng": "Hỗ trợ mạng",
     "RAM": "RAM",
-    "ROM": "Rom",
+    "ROM": "ROM",
     "Pin": "Pin",
     "Hệ điều hành": "Hệ điều hành",
     "Kháng nước bụi": "Kháng nước bụi",
