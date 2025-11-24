@@ -15,6 +15,7 @@ import json
 import re
 from datetime import datetime
 import os
+import sys
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
@@ -700,6 +701,11 @@ class UnifiedCrawlerManager:
         if self.load_checkpoint():
             print("✅ Đã load checkpoint thành công")
 
+        if use_db_config:
+            self.etl_logger = ETLLogger(get_db_config())
+        else:
+            self.etl_logger = None
+
     def start_driver(self):
         print("\n🚀 Khởi động browser với anti-detection...")
         options = webdriver.ChromeOptions()
@@ -892,16 +898,37 @@ class UnifiedCrawlerManager:
         print(f"Nguồn: {', '.join([self.crawlers[s].source_name for s in sources])}")
         print("=" * 70)
 
+        # THÊM MỚI: Bắt đầu ETL batch
+        if self.etl_logger:
+            source_names = ', '.join([self.crawlers[s].source_name for s in sources])
+            self.etl_logger.start_batch(source_names)
+            self.etl_logger.start_process('Extract')  # Process ID = 1
+
         total_success = 0
 
-        for source_name in sources:
-            success = self.crawl_source(source_name, max_products=max_products_per_source)
-            total_success += success
+        try:
+            for source_name in sources:
+                success = self.crawl_source(source_name, max_products=max_products_per_source)
+                total_success += success
 
-            if len(sources) > 1:
-                print("\n🔄 Chuyển nguồn → restart driver...")
-                self.restart_driver()
-                time.sleep(3)
+                # THÊM MỚI: Log progress sau mỗi nguồn
+                if self.etl_logger:
+                    self.etl_logger.log_progress(records_inserted=success)
+
+                if len(sources) > 1:
+                    print("\n🔄 Chuyển nguồn → restart driver...")
+                    self.restart_driver()
+                    time.sleep(3)
+
+            # THÊM MỚI: Kết thúc process Extract thành công
+            if self.etl_logger:
+                self.etl_logger.end_process('success')
+
+        except Exception as e:
+            # THÊM MỚI: Log lỗi nếu có
+            if self.etl_logger:
+                self.etl_logger.end_process('failed', str(e))
+            raise
 
         return total_success
 
@@ -985,6 +1012,119 @@ class UnifiedCrawlerManager:
             os.remove(self.checkpoint_file)
             print("\n✔ Đã xóa checkpoint file")
 
+
+class ETLLogger:
+    def __init__(self, db_config: Dict[str, Any]):
+        self.db_config = db_config
+        self.conn = None
+        self.batch_id = None
+        self.current_process_id = None
+
+    def _get_connection(self):
+        """Tạo connection mới cho logger"""
+        return pymysql.connect(
+            host=self.db_config['host'],
+            port=self.db_config.get('port', 3306),
+            user=self.db_config['user'],
+            password=self.db_config['password'],
+            database=self.db_config['database'],
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=False
+        )
+
+    def start_batch(self, source_name: str) -> int:
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO etl_log (source_table, batch_id, status) VALUES (%s, UUID(), 'started')",
+                    (source_name,)
+                )
+                cursor.execute("SELECT LAST_INSERT_ID() AS id")
+                result = cursor.fetchone()
+                self.batch_id = result['id']
+                conn.commit()
+                print(f"Bắt đầu batch_id: {self.batch_id} | source: {source_name}")
+                return self.batch_id
+        finally:
+            conn.close()
+
+    def start_process(self, process_name: str) -> bool:
+        if not self.batch_id:
+            return False
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT process_id FROM process WHERE process_name = %s", (process_name,))
+                row = cursor.fetchone()
+                if not row:
+                    print(f"Không tìm thấy process: {process_name}")
+                    return False
+                process_id = row['process_id']
+                cursor.execute("""
+                               UPDATE etl_log
+                               SET process_id = %s,
+                                   status     = 'running',
+                                   start_time = NOW()
+                               WHERE etl_id = %s
+                               """, (process_id, self.batch_id))
+                conn.commit()
+                print(f"Bắt đầu process: {process_name} (ID: {process_id})")
+                return True
+        finally:
+            conn.close()
+
+    def log_progress(self, records_inserted: int = 0, records_updated: int = 0,
+                     records_skipped: int = 0, message: str = None):
+        """Cập nhật tiến độ trong quá trình chạy"""
+        if not self.batch_id:
+            return
+
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                update_parts = ["records_inserted = records_inserted + %s",
+                                "records_updated = records_updated + %s",
+                                "records_skipped = records_skipped + %s"]
+                params = [records_inserted, records_updated, records_skipped]
+
+                if message:
+                    update_parts.append("error_message = %s")
+                    params.append(message)
+
+                params.append(self.batch_id)
+
+                sql = f"UPDATE etl_log SET {', '.join(update_parts)} WHERE etl_id = %s"
+                cursor.execute(sql, params)
+                conn.commit()
+        finally:
+            conn.close()
+
+    def end_process(self, status: str = 'success', error_message: str = None):
+        """Kết thúc process"""
+        if not self.batch_id:
+            return
+
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """UPDATE etl_log
+                       SET status        = %s,
+                           end_time      = NOW(),
+                           error_message = %s
+                       WHERE etl_id = %s""",
+                    (status, error_message, self.batch_id)
+                )
+                conn.commit()
+
+                if status == 'success':
+                    print(f"✅ Hoàn thành process thành công")
+                else:
+                    print(f"❌ Process kết thúc với lỗi: {error_message}")
+        finally:
+            conn.close()
 
 def main():
     print("=" * 70)
@@ -1172,6 +1312,42 @@ def main():
     finally:
         manager.close_driver()
 
+def is_running_from_task_scheduler():
+    try:
+        return "idle" in os.popen('qwinsta').read().lower() or sys.stdin.isatty() == False
+    except:
+        return len(sys.argv) > 1
+
 
 if __name__ == "__main__":
-    main()
+    if is_running_from_task_scheduler() or len(sys.argv) > 1:
+        # CHẾ ĐỘ TỰ ĐỘNG CHO TASK SCHEDULER
+        print("Chạy tự động từ Task Scheduler")
+
+        # TẮT MENU - CHẠY ĐẦY ĐỦ 2 WEBSITE, KHÔNG GIỚI HẠN SỐ LƯỢNG
+        manager = UnifiedCrawlerManager(
+            headless=True,  # bắt buộc headless
+            save_checkpoint=True,
+            use_db_config=True  # ưu tiên dùng DB config
+        )
+        manager.driver_restart_interval = 40
+
+        try:
+            manager.start_driver()
+            total = manager.crawl_all_sources(
+                sources=['cellphones', 'tgdd'],
+                max_products_per_source=None  # crawl hết
+            )
+            if manager.all_products:
+                manager.save_results()
+            print(f"HOÀN TẤT: {len(manager.all_products)} sản phẩm")
+        except Exception as e:
+            print(f"LỖI: {e}")
+            import traceback
+
+            traceback.print_exc()
+        finally:
+            manager.close_driver()
+    else:
+        # Giữ nguyên menu tương tác khi chạy tay
+        main()
