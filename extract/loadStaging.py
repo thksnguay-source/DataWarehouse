@@ -1,7 +1,10 @@
 import json
 from sqlalchemy import create_engine, text
-from config.db_loadStaging import get_mysql_load_staging_url, get_mysql_control_url
+# from config.db_loadStaging import get_mysql_load_staging_url, get_mysql_control_url
 from datetime import datetime
+from transform.etl_transforms import get_mysql_url,get_control_mysql_url
+
+
 
             # các trường trong general
 field_map = {
@@ -14,7 +17,7 @@ field_map = {
     "Sim": "Sim",
     "Hỗ trợ mạng": "Hỗ trợ mạng",
     "RAM": "RAM",
-    "ROM": "Rom",
+    "ROM": "ROM",
     "Pin": "Pin",
     "Hệ điều hành": "Hệ điều hành",
     "Kháng nước bụi": "Kháng nước bụi",
@@ -29,7 +32,7 @@ def load_json(file_path):
 
                 # --- Xóa dữ liệu cũ ---
 def clear_table():
-    engine = create_engine(get_mysql_load_staging_url(), echo=True)
+    engine = create_engine(get_mysql_url(), echo=True)
     with engine.begin() as conn:
         conn.execute(text("CALL sp_clear_general();"))
     print("Đã xóa toàn bộ dữ liệu cũ trong bảng general!")
@@ -53,8 +56,8 @@ def insert_one(item, conn):
 
                 # --- ETL process chính ---
 def etl_log(file_list):
-    staging_engine = create_engine(get_mysql_load_staging_url())
-    control_engine = create_engine(get_mysql_control_url())
+    staging_engine = create_engine(get_mysql_url())
+    control_engine = create_engine(get_control_mysql_url())
 
     clear_table()
 
