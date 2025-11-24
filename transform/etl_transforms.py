@@ -3,10 +3,15 @@ import re
 import hashlib
 from datetime import datetime
 from pathlib import Path
+import sys
 
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.types import Text as SQLText
+
+# Import database configuration
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from config.db_config import get_mysql_url, get_mysql_url_control
 
 # ============================================
 # MYSQL CONNECTION
@@ -14,17 +19,11 @@ from sqlalchemy.types import Text as SQLText
 MYSQL_DB = "staging"  # Giữ đúng tên schema đang sử dụng trong MySQL
 CONTROL_DB = "control"      # Database phục vụ ghi log quy trình
 
-def get_mysql_url():
-    return "mysql+pymysql://root:@localhost:3306/staging?charset=utf8mb4"
-
 def create_mysql_engine():
     return create_engine(get_mysql_url(), pool_pre_ping=True)
 
-def get_control_mysql_url():
-    return "mysql+pymysql://root:@localhost:3306/control?charset=utf8mb4"
-
 def create_control_engine():
-    return create_engine(get_control_mysql_url(), pool_pre_ping=True)
+    return create_engine(get_mysql_url_control(), pool_pre_ping=True)
 
 # Đường dẫn gốc dự án (ví dụ: D:\datawh)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -32,23 +31,28 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONTROL_PROCESS_METADATA = {
     "extract": {
         "name": "Extract",
-        "description": "Trích xuất dữ liệu từ nguồn vào bảng general.",
+        "description": "Trích xuất dữ liệu từ nguồn vào thư mục crawl.",
         "order": 1,
-    },
-    "transform": {
-        "name": "Transform",
-        "description": "Chuẩn hóa dữ liệu trung gian trước khi load.",
-        "order": 2,
     },
     "load_staging": {
         "name": "Load_Staging",
-        "description": "Đưa dữ liệu chuẩn hóa vào stg_products.",
+        "description": "Tải dữ liệu từ thư mục crawl vào Database Staging.",
+        "order": 2,
+    },
+    "transform": {
+        "name": "Transform",
+        "description": "Chuyển đổi dữ liệu từ Staging Database.",
         "order": 3,
     },
     "load_dwh": {
         "name": "LoadDataWarehouse",
-        "description": "Đồng bộ và ghi nhận SCD vào dim_product.",
+        "description": "Tải dữ liệu đã chuyển đổi vào Data Warehouse Database.",
         "order": 4,
+    },
+    "load_datamarts": {
+        "name": "LoadDatamarts",
+        "description": "Xây dựng và tải dữ liệu từ Data Warehouse vào Product Data Mart.",
+        "order": 5,
     },
 }
 
@@ -124,19 +128,23 @@ def build_mysql_column_definition(col_name, data_type, max_length):
 def ensure_dim_product_structure(conn, columns_info):
     """
     Đảm bảo dim_product tồn tại với đầy đủ cột (bao gồm metadata phục vụ SCD2).
+    Loại bỏ các cột cũ: Tên sản phẩm, Giá, Nguồn (đã được thay thế bằng ten_san_pham, sale_price_vnd, nguon).
     """
+    # Danh sách các cột cũ cần loại bỏ
+    columns_to_exclude = {'Tên sản phẩm', 'Giá', 'Nguồn'}
+    
+    # Lọc bỏ các cột không mong muốn
+    filtered_columns_info = [
+        (col_name, data_type, max_length) 
+        for col_name, data_type, max_length in columns_info 
+        if col_name not in columns_to_exclude
+    ]
+    
     column_definitions = {}
-    for col_name, data_type, max_length in columns_info:
+    for col_name, data_type, max_length in filtered_columns_info:
         column_definitions[col_name] = build_mysql_column_definition(col_name, data_type, max_length)
 
-    metadata_definitions = {
-        "record_hash": "CHAR(64) NOT NULL",
-        # Thêm DEFAULT để tránh lỗi strict mode khi bảng đã có sẵn dữ liệu
-        "effective_start": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
-        "effective_end": "DATETIME NULL",
-        "is_current": "TINYINT(1) NOT NULL DEFAULT 1",
-        "version_no": "INT NOT NULL DEFAULT 1",
-    }
+    metadata_definitions = {}
 
     create_columns = (
         ["product_id INT AUTO_INCREMENT PRIMARY KEY"]
@@ -168,6 +176,17 @@ def ensure_dim_product_structure(conn, columns_info):
             {"schema": MYSQL_DB},
         )
     }
+
+    # Loại bỏ các cột cũ nếu chúng tồn tại
+    columns_to_drop = {'Tên sản phẩm', 'Giá', 'Nguồn'}
+    for col_to_drop in columns_to_drop:
+        if col_to_drop in existing_columns:
+            try:
+                conn.execute(text(f"ALTER TABLE dim_product DROP COLUMN `{col_to_drop}`"))
+                existing_columns.discard(col_to_drop)
+                print(f"   ✓ Đã loại bỏ cột cũ: {col_to_drop}")
+            except Exception as e:
+                print(f"   ⚠️  Không thể loại bỏ cột {col_to_drop}: {e}")
 
     for col_name, col_def in column_definitions.items():
         if col_name not in existing_columns:
@@ -306,23 +325,48 @@ def _ensure_control_tables(conn):
 
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS etl_log (
-            etl_id INT(11) NOT NULL AUTO_INCREMENT,
+            etl_id INT NOT NULL AUTO_INCREMENT,
             batch_id VARCHAR(50) NOT NULL,
-            process_id INT(11) NOT NULL,
-            source_table VARCHAR(50) DEFAULT NULL,
-            target_table VARCHAR(50) DEFAULT NULL,
-            records_inserted INT(11) DEFAULT 0,
-            records_updated INT(11) DEFAULT 0,
-            records_skipped INT(11) DEFAULT 0,
-            status ENUM('started','success','failed') DEFAULT 'started',
+            process_id INT NOT NULL,
+            source_table VARCHAR(50) NULL,
+            target_table VARCHAR(50) NULL,
+            records_inserted INT NULL DEFAULT 0,
+            records_updated INT NULL DEFAULT 0,
+            records_skipped INT NULL DEFAULT 0,
+            error_message VARCHAR(100) NULL,
+            status ENUM('started','success','failed') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT 'started',
             start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             end_time TIMESTAMP NULL DEFAULT NULL,
-            PRIMARY KEY (etl_id),
-            KEY fk_etl_log_process (process_id),
-            CONSTRAINT fk_etl_log_process FOREIGN KEY (process_id)
-                REFERENCES process (process_id) ON UPDATE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+            PRIMARY KEY (etl_id) USING BTREE,
+            KEY fk_etl_log_process (process_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=Dynamic
     """))
+
+    # Kiểm tra và thêm foreign key nếu chưa có
+    fk_exists = conn.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+            WHERE CONSTRAINT_SCHEMA = :schema
+              AND TABLE_NAME = 'etl_log'
+              AND CONSTRAINT_NAME = 'fk_etl_log_process'
+        """),
+        {"schema": CONTROL_DB},
+    ).scalar()
+
+    if not fk_exists:
+        try:
+            conn.execute(text("""
+                ALTER TABLE etl_log
+                ADD CONSTRAINT fk_etl_log_process
+                FOREIGN KEY (process_id)
+                REFERENCES process(process_id)
+                ON DELETE RESTRICT
+                ON UPDATE CASCADE
+            """))
+        except Exception as e:
+            # Nếu foreign key đã tồn tại hoặc có lỗi khác, bỏ qua
+            pass
 
 
 def _ensure_control_process(conn, process_key):
@@ -370,7 +414,7 @@ def control_log_start(process_key, batch_id, source_table="", target_table=""):
         return conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
 
 
-def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=0):
+def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=0, error_message=None):
     """
     Cập nhật trạng thái cho process log tương ứng.
     """
@@ -378,6 +422,10 @@ def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=
         return
     engine = create_control_engine()
     with engine.begin() as conn:
+        # Giới hạn error_message nếu quá dài
+        if error_message and len(error_message) > 100:
+            error_message = error_message[:97] + "..."
+        
         conn.execute(
             text("""
                 UPDATE etl_log
@@ -385,6 +433,7 @@ def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=
                     records_inserted = :inserted,
                     records_updated = :updated,
                     records_skipped = :skipped,
+                    error_message = :error_message,
                     end_time = NOW()
                 WHERE etl_id = :etl_id
             """),
@@ -393,6 +442,7 @@ def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=
                 "inserted": inserted or 0,
                 "updated": updated or 0,
                 "skipped": skipped or 0,
+                "error_message": error_message,
                 "etl_id": log_id,
             },
         )
@@ -483,10 +533,6 @@ def transform_data(df, simulated_date=None):
 
     df['category'] = df['ten_san_pham'].apply(categorize)
 
-    # Metadata - Thêm thông tin ngày crawl (DATETIME) - cho phép giả lập ngày cố định
-    df['ngay_crawl'] = crawl_dt
-    df['date_key'] = crawl_dt.strftime("%Y%m%d")
-
     # Xử lý nguồn dữ liệu (VARCHAR)
     df['nguon'] = df['nguon'].fillna('CellphoneS')
     df['nguon'] = df['nguon'].astype(str).str.strip()
@@ -501,7 +547,7 @@ def transform_data(df, simulated_date=None):
     # Xử lý tất cả các cột text - chuyển sang string và xử lý NULL
     # Giữ nguyên format text nhưng chuẩn bị để chuyển đổi kiểu dữ liệu trong SQL
     for col in df.columns:
-        if col not in ['brand', 'category', 'ngay_crawl', 'date_key']:
+        if col not in ['brand', 'category']:
             # Chuyển sang string nhưng giữ NULL values
             df[col] = df[col].astype(str)
             # Thay thế 'nan' và 'None' thành None (NULL trong SQL)
@@ -536,33 +582,17 @@ def load_to_staging(df):
         # Sử dụng pandas to_sql để load dữ liệu
         df_to_load = df.copy()
 
-        # Đảm bảo ngay_crawl là datetime object để pandas tự động detect
-        if 'ngay_crawl' in df_to_load.columns:
-            df_to_load['ngay_crawl'] = pd.to_datetime(df_to_load['ngay_crawl'], errors='coerce')
-
         # Load vào staging (pandas sẽ tự động tạo bảng với kiểu dữ liệu TEXT)
         df_to_load.to_sql('stg_products', engine, if_exists='replace', index=False, chunksize=1000)
 
         # Cập nhật kiểu dữ liệu sau khi load (ALTER TABLE)
         print(" 🔄 Đang chuyển đổi kiểu dữ liệu...")
         with engine.begin() as conn:
-            # Cập nhật ngay_crawl thành DATETIME
-            if 'ngay_crawl' in df.columns:
-                try:
-                    conn.execute(text("""
-                        ALTER TABLE stg_products 
-                        MODIFY COLUMN ngay_crawl DATETIME NULL
-                    """))
-                    print("   ✓ ngay_crawl -> DATETIME")
-                except Exception as e:
-                    print(f"   ⚠️  Không thể chuyển ngay_crawl sang DATETIME: {e}")
-
             # Cập nhật các cột VARCHAR (text ngắn)
             varchar_updates = {
                 'nguon': 'VARCHAR(100)',
                 'brand': 'VARCHAR(50)',
                 'category': 'VARCHAR(50)',
-                'date_key': 'VARCHAR(8)',
                 'ten_san_pham': 'VARCHAR(255)',
                 'Công nghệ NFC': 'VARCHAR(10)',
                 'Hỗ trợ mạng': 'VARCHAR(10)',
@@ -625,45 +655,21 @@ def build_staging_snapshot(engine, target_date=None):
     if stg_df.empty:
         return stg_df
 
-    if 'ngay_crawl' in stg_df.columns:
-        stg_df['ngay_crawl'] = pd.to_datetime(stg_df['ngay_crawl'], errors='coerce')
-    else:
-        stg_df['ngay_crawl'] = pd.NaT
-
-    if target_date:
-        target_dt = resolve_simulated_datetime(target_date)
-        stg_df = stg_df[stg_df['ngay_crawl'].dt.date == target_dt.date()].copy()
-        if stg_df.empty:
-            return stg_df
-
-    if 'date_key' in stg_df.columns:
-        stg_df['date_key'] = (
-            stg_df['date_key']
-            .astype(str)
-            .str.replace(r"\.0$", "", regex=True)
-        )
-    else:
-        stg_df['date_key'] = None
-    stg_df['date_key'] = stg_df['date_key'].apply(normalize_date_key)
-
-    compare_columns = [col for col in stg_df.columns if col not in {'ngay_crawl', 'date_key'}]
-    stg_df['record_hash'] = stg_df.apply(lambda row: compute_record_hash(row, compare_columns), axis=1)
-
-    stg_df = stg_df.sort_values(['ten_san_pham', 'ngay_crawl'], ascending=[True, False])
+    stg_df = stg_df.sort_values(['ten_san_pham'], ascending=[True])
     stg_df = stg_df.drop_duplicates(subset=['ten_san_pham'], keep='first')
     return stg_df
 
 
 def fetch_current_dim_lookup(engine):
     """
-    Lấy dữ liệu dim_product hiện tại (is_current=1) để phục vụ so sánh.
+    Lấy dữ liệu dim_product để phục vụ so sánh.
+    Xử lý trường hợp có duplicate ten_san_pham bằng cách lấy bản ghi đầu tiên.
     """
     try:
         dim_current = pd.read_sql(
             """
-            SELECT product_id, ten_san_pham, record_hash, date_key, ngay_crawl, version_no
+            SELECT product_id, ten_san_pham
             FROM dim_product
-            WHERE is_current = 1
         """,
             engine,
         )
@@ -673,6 +679,11 @@ def fetch_current_dim_lookup(engine):
     if dim_current.empty:
         return {}, dim_current
     dim_current['ten_san_pham'] = dim_current['ten_san_pham'].astype(str).str.strip()
+    
+    # Xử lý duplicate: nếu có nhiều bản ghi cùng ten_san_pham, lấy bản ghi đầu tiên
+    if dim_current['ten_san_pham'].duplicated().any():
+        dim_current = dim_current.drop_duplicates(subset=['ten_san_pham'], keep='first')
+    
     current_lookup = dim_current.set_index('ten_san_pham').to_dict('index')
     return current_lookup, dim_current
 
@@ -680,6 +691,7 @@ def fetch_current_dim_lookup(engine):
 def detect_dim_changes(stg_df, current_lookup):
     """
     So sánh dữ liệu stg mới với dim_product hiện tại → xác định insert/update.
+    Chỉ insert các bản ghi mới (chưa tồn tại trong dim_product).
     """
     rows_to_insert = []
     rows_to_expire = []
@@ -690,45 +702,16 @@ def detect_dim_changes(stg_df, current_lookup):
         if not product_key:
             continue
 
-        new_hash = row['record_hash']
-        new_start = row['ngay_crawl']
-        if pd.isna(new_start):
-            new_start = datetime.now()
-            row['ngay_crawl'] = new_start
-
         existing = current_lookup.get(product_key)
         if not existing:
+            # Bản ghi mới, cần insert
             row_dict = row.to_dict()
             row_dict['ten_san_pham'] = product_key
-            row_dict['date_key'] = normalize_date_key(row_dict.get('date_key'))
-            row_dict['ngay_crawl'] = new_start
-            row_dict['effective_start'] = new_start
-            row_dict['effective_end'] = None
-            row_dict['is_current'] = 1
-            row_dict['version_no'] = 1
             rows_to_insert.append(row_dict)
-            continue
-
-        if existing.get('record_hash') == new_hash:
+        else:
+            # Bản ghi đã tồn tại, bỏ qua
             unchanged_rows += 1
             continue
-
-        rows_to_expire.append(
-            {
-                "product_id": int(existing['product_id']),
-                "end_ts": new_start,
-            }
-        )
-
-        row_dict = row.to_dict()
-        row_dict['ten_san_pham'] = product_key
-        row_dict['date_key'] = normalize_date_key(row_dict.get('date_key'))
-        row_dict['ngay_crawl'] = new_start
-        row_dict['effective_start'] = new_start
-        row_dict['effective_end'] = None
-        row_dict['is_current'] = 1
-        row_dict['version_no'] = int(existing.get('version_no') or 1) + 1
-        rows_to_insert.append(row_dict)
 
     return rows_to_insert, rows_to_expire, unchanged_rows
 
@@ -774,24 +757,19 @@ def load_to_dim():
         return 0, 0
 
     with engine.begin() as conn:
-        if rows_to_expire:
-            conn.execute(
-                text("""
-                    UPDATE dim_product
-                    SET is_current = 0,
-                        effective_end = :end_ts
-                    WHERE product_id = :product_id
-                """),
-                rows_to_expire,
-            )
-
         if rows_to_insert:
             insert_df = pd.DataFrame(rows_to_insert)
+            # Loại bỏ các cột cũ nếu có trong DataFrame
+            columns_to_exclude = {'Tên sản phẩm', 'Giá', 'Nguồn'}
+            for col in columns_to_exclude:
+                if col in insert_df.columns:
+                    insert_df = insert_df.drop(columns=[col])
+            
             for col in dim_columns_order:
                 if col not in insert_df.columns:
                     insert_df[col] = None
             insert_df = insert_df[dim_columns_order]
-            insert_df.to_sql('dim_product', conn, if_exists='append', index=False, chunksize=500)
+            insert_df.to_sql('dim_product', engine, if_exists='append', index=False, chunksize=500)
 
     inserted_count = len(rows_to_insert)
     updated_count = len(rows_to_expire)
@@ -818,22 +796,19 @@ def compare_staging_with_dim(target_date=None, sample_size=5):
     summary = {
         "total_stg": len(stg_snapshot),
         "dim_current": len(dim_current),
-        "new_records": len([r for r in rows_to_insert if r['version_no'] == 1]),
-        "changed_records": len(rows_to_insert) - len([r for r in rows_to_insert if r['version_no'] == 1]),
-        "expire_candidates": len(rows_to_expire),
+        "new_records": len(rows_to_insert),
         "unchanged": unchanged_rows,
     }
 
     print(f" 📌 Tổng dòng stg: {summary['total_stg']}")
     print(f" 📌 Số bản ghi dim hiện tại: {summary['dim_current']}")
-    print(f" ➕ Bản ghi mới hoàn toàn: {summary['new_records']}")
-    print(f" 🔁 Bản ghi cần cập nhật phiên bản: {summary['changed_records']}")
+    print(f" ➕ Bản ghi mới sẽ được insert: {summary['new_records']}")
     print(f" 💤 Bản ghi giữ nguyên: {summary['unchanged']}")
 
     if rows_to_insert:
         sample_df = pd.DataFrame(rows_to_insert[:sample_size])
-        cols_to_show = [col for col in ['ten_san_pham', 'sale_price_vnd', 'brand', 'ngay_crawl', 'version_no'] if col in sample_df.columns]
-        print("\n Ví dụ bản ghi sẽ được nạp/ cập nhật:")
+        cols_to_show = [col for col in ['ten_san_pham', 'sale_price_vnd', 'brand'] if col in sample_df.columns]
+        print("\n Ví dụ bản ghi sẽ được nạp:")
         print(sample_df[cols_to_show].to_string(index=False))
     else:
         print("\n ✅ Không có sự khác biệt giữa ngày mới và dữ liệu dim hiện tại.")
@@ -845,58 +820,11 @@ def compare_staging_with_dim(target_date=None, sample_size=5):
 # SYNC DATE_KEY + DIM
 # ============================================
 def sync_date_key_and_dim(rebuild_dim=True):
-    print("\n" + "="*60)
-    print("BƯỚC 4: SYNC - Đồng bộ date_key & dim_product")
-    print("="*60)
-    engine = create_mysql_engine()
-
-    with engine.begin() as conn:
-        stg_count = conn.execute(text("SELECT COUNT(*) FROM stg_products")).scalar()
-        if stg_count == 0:
-            print(" ⚠️ stg_products đang trống, bỏ qua đồng bộ date_key.")
-            return 0, 0
-
-        date_count = conn.execute(text("SELECT COUNT(*) FROM date_dims")).scalar()
-        if date_count == 0:
-            raise ValueError("Bảng date_dims không có dữ liệu, không thể map date_key.")
-
-        has_ngay = conn.execute(
-            text("""
-                SELECT COUNT(*) 
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = :schema
-                  AND TABLE_NAME = 'stg_products'
-                  AND COLUMN_NAME = 'ngay_crawl'
-            """),
-            {"schema": MYSQL_DB},
-        ).scalar()
-
-        if has_ngay == 0:
-            raise KeyError("Không tìm thấy cột 'ngay_crawl' trong stg_products.")
-
-        # Cập nhật date_key dựa trên date_dims
-        conn.execute(text("""
-            UPDATE stg_products s
-            LEFT JOIN date_dims d ON DATE(s.ngay_crawl) = DATE(d.full_date)
-            SET s.date_key = d.date_sk
-        """))
-
-        missing = conn.execute(text("""
-            SELECT COUNT(*) 
-            FROM stg_products s
-            LEFT JOIN date_dims d ON DATE(s.ngay_crawl) = DATE(d.full_date)
-            WHERE d.date_sk IS NULL
-        """)).scalar()
-
-    if missing:
-        print(f" ⚠️ Có {missing} dòng chưa match được date_key trong date_dims.")
-    else:
-        print(" ✅ date_key trong stg_products đã đồng bộ với date_dims.")
-
+    """
+    Đơn giản hóa: chỉ load vào dim_product, không còn sync date_key nữa.
+    """
     if rebuild_dim:
-        print(" 🔄 Đang rebuild dim_product sau khi cập nhật date_key...")
         return load_to_dim()
-
     return 0, 0
 
 # ============================================
@@ -968,9 +896,10 @@ def run_etl(simulated_date=None, stage_only=False, auto_compare=False):
         print("❌ ETL THẤT BẠI!")
         print(f" Lỗi: {e}")
         # Đánh dấu các process đang dang dở là failed
+        error_msg = str(e)
         for key, log_id in control_logs.items():
             if log_id:
-                control_log_finish(log_id, status="failed")
+                control_log_finish(log_id, status="failed", error_message=error_msg)
         raise
 
 # ============================================
