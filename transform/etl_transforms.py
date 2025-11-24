@@ -9,6 +9,10 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.types import Text as SQLText
 
+# Bước 1-4: Khởi tạo và Extract
+# Bước 5-13: Transform (làm sạch dữ liệu)
+# Bước 14-18: Load Staging
+# Bước 19-35: Load Dimension
 # Import database configuration
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from config.db_config import get_mysql_url, get_mysql_url_control
@@ -17,14 +21,19 @@ from config.db_config import get_mysql_url, get_mysql_url_control
 # MYSQL CONNECTION
 # ============================================
 MYSQL_DB = "staging"  # Giữ đúng tên schema đang sử dụng trong MySQL
-CONTROL_DB = "control"      # Database phục vụ ghi log quy trình
+CONTROL_DB = "control"  # Database phục vụ ghi log quy trình
 
+
+# 1 Kiểm tra kết nối db
 def create_mysql_engine():
     return create_engine(get_mysql_url(), pool_pre_ping=True)
+
 
 def create_control_engine():
     return create_engine(get_mysql_url_control(), pool_pre_ping=True)
 
+
+# 2. ETL để ghi log vào bảng control.process
 # Đường dẫn gốc dự án (ví dụ: D:\datawh)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -57,6 +66,7 @@ CONTROL_PROCESS_METADATA = {
 }
 
 
+# 3. nhập ngày mô phỏng với nhiều định dạng
 def resolve_simulated_datetime(simulated_date):
     """
     Hỗ trợ parse ngày giả lập (ví dụ '21/11/2025') để đồng bộ xuyên suốt ETL.
@@ -86,6 +96,8 @@ def resolve_simulated_datetime(simulated_date):
         "Hãy sử dụng định dạng dd/mm/YYYY hoặc YYYY-mm-dd."
     )
 
+
+# 4. So sánh 2 bản ghi có khác nhau hay không (scd type2)
 def _normalize_value_for_hash(value):
     if value is None:
         return ""
@@ -103,6 +115,8 @@ def compute_record_hash(row, columns):
     raw = "||".join(normalized)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+
+# 5. xây dựng lại cấu trúc bảng
 
 def build_mysql_column_definition(col_name, data_type, max_length):
     col_name_escaped = f"`{col_name}`"
@@ -124,7 +138,10 @@ def build_mysql_column_definition(col_name, data_type, max_length):
 
     return f"{col_name_escaped} {sql_type} NULL"
 
-
+# Tự động tạo bảng nếu chưa có
+# Thêm cột mới nếu thiếu
+# Xóa cột cũ không dùng nữa
+# Tạo index tối ưu tìm kiếm
 def ensure_dim_product_structure(conn, columns_info):
     """
     Đảm bảo dim_product tồn tại với đầy đủ cột (bao gồm metadata phục vụ SCD2).
@@ -132,14 +149,14 @@ def ensure_dim_product_structure(conn, columns_info):
     """
     # Danh sách các cột cũ cần loại bỏ
     columns_to_exclude = {'Tên sản phẩm', 'Giá', 'Nguồn'}
-    
+
     # Lọc bỏ các cột không mong muốn
     filtered_columns_info = [
-        (col_name, data_type, max_length) 
-        for col_name, data_type, max_length in columns_info 
+        (col_name, data_type, max_length)
+        for col_name, data_type, max_length in columns_info
         if col_name not in columns_to_exclude
     ]
-    
+
     column_definitions = {}
     for col_name, data_type, max_length in filtered_columns_info:
         column_definitions[col_name] = build_mysql_column_definition(col_name, data_type, max_length)
@@ -147,9 +164,9 @@ def ensure_dim_product_structure(conn, columns_info):
     metadata_definitions = {}
 
     create_columns = (
-        ["product_id INT AUTO_INCREMENT PRIMARY KEY"]
-        + list(column_definitions.values())
-        + [f"`{name}` {definition}" for name, definition in metadata_definitions.items()]
+            ["product_id INT AUTO_INCREMENT PRIMARY KEY"]
+            + list(column_definitions.values())
+            + [f"`{name}` {definition}" for name, definition in metadata_definitions.items()]
     )
 
     conn.execute(
@@ -171,7 +188,7 @@ def ensure_dim_product_structure(conn, columns_info):
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = :schema
                   AND TABLE_NAME = 'dim_product'
-            """
+                """
             ),
             {"schema": MYSQL_DB},
         )
@@ -206,7 +223,7 @@ def ensure_dim_product_structure(conn, columns_info):
             WHERE TABLE_SCHEMA = :schema
               AND TABLE_NAME = 'dim_product'
               AND INDEX_NAME = 'unique_product'
-        """
+            """
         ),
         {"schema": MYSQL_DB},
     ).scalar()
@@ -222,7 +239,7 @@ def ensure_dim_product_structure(conn, columns_info):
             WHERE TABLE_SCHEMA = :schema
               AND TABLE_NAME = 'dim_product'
               AND INDEX_NAME = 'idx_dim_product_ten'
-        """
+            """
         ),
         {"schema": MYSQL_DB},
     ).scalar()
@@ -246,7 +263,7 @@ def normalize_date_key(value):
     if value_str.lower() in {"", "nan", "none", "nat", "null"}:
         return None
     return value_str
-
+# xử lý giá
 
 def parse_price_to_decimal(price_str):
     """
@@ -255,19 +272,19 @@ def parse_price_to_decimal(price_str):
     """
     if price_str is None or pd.isna(price_str):
         return None
-    
+
     price_str = str(price_str).strip()
     if price_str.lower() in {"", "nan", "none", "nat", "null", "không có", "n/a"}:
         return None
-    
+
     # Loại bỏ các ký tự không phải số, dấu chấm, phẩy
     # Giữ lại số, dấu chấm (.), dấu phẩy (,)
     # Loại bỏ tất cả ký tự không phải số, dấu chấm, dấu phẩy
     cleaned = re.sub(r'[^\d.,]', '', price_str)
-    
+
     if not cleaned:
         return None
-    
+
     # Xử lý dấu phẩy và chấm
     # Nếu có cả dấu chấm và phẩy, dấu phẩy thường là phân cách hàng nghìn, chấm là thập phân (hoặc ngược lại)
     if ',' in cleaned and '.' in cleaned:
@@ -297,12 +314,13 @@ def parse_price_to_decimal(price_str):
         if cleaned.count('.') > 1:
             cleaned = cleaned.replace('.', '')
         # Nếu chỉ có 1 dấu chấm, giữ nguyên (có thể là thập phân)
-    
+
     try:
         price_decimal = float(cleaned)
         return round(price_decimal, 2)
     except (ValueError, TypeError):
         return None
+
 
 # ============================================
 # CONTROL DB LOGGING (ETL MONITORING)
@@ -313,57 +331,106 @@ def _ensure_control_tables(conn):
     Đảm bảo các bảng control.process & control.etl_log tồn tại đúng cấu trúc.
     """
     conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS process (
-            process_id INT(11) NOT NULL AUTO_INCREMENT,
-            process_name VARCHAR(100) NOT NULL,
-            process_description VARCHAR(255) DEFAULT NULL,
-            step_order INT(11) NOT NULL COMMENT 'Thứ tự thực hiện của process',
-            PRIMARY KEY (process_id),
-            UNIQUE KEY uq_process_name (process_name)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
-    """))
+                      CREATE TABLE IF NOT EXISTS process
+                      (
+                          process_id
+                          INT
+                      (
+                          11
+                      ) NOT NULL AUTO_INCREMENT,
+                          process_name VARCHAR
+                      (
+                          100
+                      ) NOT NULL,
+                          process_description VARCHAR
+                      (
+                          255
+                      ) DEFAULT NULL,
+                          step_order INT
+                      (
+                          11
+                      ) NOT NULL COMMENT 'Thứ tự thực hiện của process',
+                          PRIMARY KEY
+                      (
+                          process_id
+                      ),
+                          UNIQUE KEY uq_process_name
+                      (
+                          process_name
+                      )
+                          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE =utf8mb4_general_ci
+                      """))
 
     conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS etl_log (
-            etl_id INT NOT NULL AUTO_INCREMENT,
-            batch_id VARCHAR(50) NOT NULL,
-            process_id INT NOT NULL,
-            source_table VARCHAR(50) NULL,
-            target_table VARCHAR(50) NULL,
-            records_inserted INT NULL DEFAULT 0,
-            records_updated INT NULL DEFAULT 0,
-            records_skipped INT NULL DEFAULT 0,
-            error_message VARCHAR(100) NULL,
-            status ENUM('started','success','failed') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT 'started',
-            start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            end_time TIMESTAMP NULL DEFAULT NULL,
-            PRIMARY KEY (etl_id) USING BTREE,
-            KEY fk_etl_log_process (process_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=Dynamic
-    """))
+                      CREATE TABLE IF NOT EXISTS etl_log
+                      (
+                          etl_id
+                          INT
+                          NOT
+                          NULL
+                          AUTO_INCREMENT,
+                          batch_id
+                          VARCHAR
+                      (
+                          50
+                      ) NOT NULL,
+                          process_id INT NOT NULL,
+                          source_table VARCHAR
+                      (
+                          50
+                      ) NULL,
+                          target_table VARCHAR
+                      (
+                          50
+                      ) NULL,
+                          records_inserted INT NULL DEFAULT 0,
+                          records_updated INT NULL DEFAULT 0,
+                          records_skipped INT NULL DEFAULT 0,
+                          error_message VARCHAR
+                      (
+                          100
+                      ) NULL,
+                          status ENUM
+                      (
+                          'started',
+                          'success',
+                          'failed'
+                      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT 'started',
+                          start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                          end_time TIMESTAMP NULL DEFAULT NULL,
+                          PRIMARY KEY
+                      (
+                          etl_id
+                      ) USING BTREE,
+                          KEY fk_etl_log_process
+                      (
+                          process_id
+                      )
+                          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE =utf8mb4_general_ci ROW_FORMAT= Dynamic
+                      """))
 
     # Kiểm tra và thêm foreign key nếu chưa có
     fk_exists = conn.execute(
         text("""
-            SELECT COUNT(*)
-            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-            WHERE CONSTRAINT_SCHEMA = :schema
-              AND TABLE_NAME = 'etl_log'
-              AND CONSTRAINT_NAME = 'fk_etl_log_process'
-        """),
+             SELECT COUNT(*)
+             FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+             WHERE CONSTRAINT_SCHEMA = :schema
+               AND TABLE_NAME = 'etl_log'
+               AND CONSTRAINT_NAME = 'fk_etl_log_process'
+             """),
         {"schema": CONTROL_DB},
     ).scalar()
 
     if not fk_exists:
         try:
             conn.execute(text("""
-                ALTER TABLE etl_log
-                ADD CONSTRAINT fk_etl_log_process
-                FOREIGN KEY (process_id)
-                REFERENCES process(process_id)
-                ON DELETE RESTRICT
-                ON UPDATE CASCADE
-            """))
+                              ALTER TABLE etl_log
+                                  ADD CONSTRAINT fk_etl_log_process
+                                      FOREIGN KEY (process_id)
+                                          REFERENCES process (process_id)
+                                          ON DELETE RESTRICT
+                                          ON UPDATE CASCADE
+                              """))
         except Exception as e:
             # Nếu foreign key đã tồn tại hoặc có lỗi khác, bỏ qua
             pass
@@ -383,9 +450,9 @@ def _ensure_control_process(conn, process_key):
 
     conn.execute(
         text("""
-            INSERT INTO process (process_name, process_description, step_order)
-            VALUES (:name, :desc, :order_no)
-        """),
+             INSERT INTO process (process_name, process_description, step_order)
+             VALUES (:name, :desc, :order_no)
+             """),
         {"name": meta["name"], "desc": meta["description"], "order_no": meta["order"]},
     )
     return conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
@@ -401,9 +468,9 @@ def control_log_start(process_key, batch_id, source_table="", target_table=""):
         process_id = _ensure_control_process(conn, process_key)
         conn.execute(
             text("""
-                INSERT INTO etl_log (batch_id, process_id, source_table, target_table, status)
-                VALUES (:batch_id, :process_id, :source_table, :target_table, 'started')
-            """),
+                 INSERT INTO etl_log (batch_id, process_id, source_table, target_table, status)
+                 VALUES (:batch_id, :process_id, :source_table, :target_table, 'started')
+                 """),
             {
                 "batch_id": batch_id,
                 "process_id": process_id,
@@ -425,18 +492,18 @@ def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=
         # Giới hạn error_message nếu quá dài
         if error_message and len(error_message) > 100:
             error_message = error_message[:97] + "..."
-        
+
         conn.execute(
             text("""
-                UPDATE etl_log
-                SET status = :status,
-                    records_inserted = :inserted,
-                    records_updated = :updated,
-                    records_skipped = :skipped,
-                    error_message = :error_message,
-                    end_time = NOW()
-                WHERE etl_id = :etl_id
-            """),
+                 UPDATE etl_log
+                 SET status           = :status,
+                     records_inserted = :inserted,
+                     records_updated  = :updated,
+                     records_skipped  = :skipped,
+                     error_message    = :error_message,
+                     end_time         = NOW()
+                 WHERE etl_id = :etl_id
+                 """),
             {
                 "status": status,
                 "inserted": inserted or 0,
@@ -447,13 +514,14 @@ def control_log_finish(log_id, status="success", inserted=0, updated=0, skipped=
             },
         )
 
+
 # ============================================
 # EXTRACT
 # ============================================
 def extract_from_general():
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("BƯỚC 1: EXTRACT - Đọc dữ liệu từ bảng general")
-    print("="*60)
+    print("=" * 60)
     engine = create_mysql_engine()
     try:
         query = "SELECT * FROM general"
@@ -464,13 +532,14 @@ def extract_from_general():
         print(f" Lỗi khi đọc dữ liệu: {e}")
         raise
 
+
 # ============================================
 # TRANSFORM
 # ============================================
 def transform_data(df, simulated_date=None):
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("BƯỚC 2: TRANSFORM - Làm sạch và chuẩn hóa dữ liệu")
-    print("="*60)
+    print("=" * 60)
     df = df.copy()
     crawl_dt = resolve_simulated_datetime(simulated_date) if simulated_date else datetime.now()
 
@@ -570,13 +639,14 @@ def transform_data(df, simulated_date=None):
     print(f" 📋 Các cột: {', '.join(df.columns[:5])}... (tổng {len(df.columns)} cột)")
     return df
 
+
 # ============================================
 # LOAD TO STAGING
 # ============================================
 def load_to_staging(df):
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("BƯỚC 3: LOAD - Nạp dữ liệu vào stg_products")
-    print("="*60)
+    print("=" * 60)
     engine = create_mysql_engine()
     try:
         # Sử dụng pandas to_sql để load dữ liệu
@@ -605,14 +675,14 @@ def load_to_staging(df):
                 'Thẻ SIM': 'VARCHAR(50)',
                 'Loại CPU': 'VARCHAR(50)'
             }
-            
+
             # Cập nhật sale_price_vnd thành DECIMAL
             if 'sale_price_vnd' in df.columns:
                 try:
                     conn.execute(text("""
-                        ALTER TABLE stg_products 
-                        MODIFY COLUMN sale_price_vnd DECIMAL(15,2) NULL
-                    """))
+                                      ALTER TABLE stg_products
+                                          MODIFY COLUMN sale_price_vnd DECIMAL (15,2) NULL
+                                      """))
                     print("   ✓ sale_price_vnd -> DECIMAL(15,2)")
                 except Exception as e:
                     print(f"   ⚠️  Không thể chuyển sale_price_vnd sang DECIMAL: {e}")
@@ -670,7 +740,7 @@ def fetch_current_dim_lookup(engine):
             """
             SELECT product_id, ten_san_pham
             FROM dim_product
-        """,
+            """,
             engine,
         )
     except Exception:
@@ -679,11 +749,11 @@ def fetch_current_dim_lookup(engine):
     if dim_current.empty:
         return {}, dim_current
     dim_current['ten_san_pham'] = dim_current['ten_san_pham'].astype(str).str.strip()
-    
+
     # Xử lý duplicate: nếu có nhiều bản ghi cùng ten_san_pham, lấy bản ghi đầu tiên
     if dim_current['ten_san_pham'].duplicated().any():
         dim_current = dim_current.drop_duplicates(subset=['ten_san_pham'], keep='first')
-    
+
     current_lookup = dim_current.set_index('ten_san_pham').to_dict('index')
     return current_lookup, dim_current
 
@@ -715,13 +785,14 @@ def detect_dim_changes(stg_df, current_lookup):
 
     return rows_to_insert, rows_to_expire, unchanged_rows
 
+
 # ============================================
 # LOAD TO DIMENSION TABLE
 # ============================================
 def load_to_dim():
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("BƯỚC 4: LOAD - Nạp dữ liệu vào dim_product")
-    print("="*60)
+    print("=" * 60)
     engine = create_mysql_engine()
 
     with engine.begin() as conn:
@@ -733,7 +804,7 @@ def load_to_dim():
                 WHERE TABLE_SCHEMA = :schema
                   AND TABLE_NAME = 'stg_products'
                 ORDER BY ORDINAL_POSITION
-            """
+                """
             ),
             {"schema": MYSQL_DB},
         )
@@ -764,7 +835,7 @@ def load_to_dim():
             for col in columns_to_exclude:
                 if col in insert_df.columns:
                     insert_df = insert_df.drop(columns=[col])
-            
+
             for col in dim_columns_order:
                 if col not in insert_df.columns:
                     insert_df[col] = None
@@ -773,7 +844,8 @@ def load_to_dim():
 
     inserted_count = len(rows_to_insert)
     updated_count = len(rows_to_expire)
-    print(f" ✅ Đã áp dụng SCD Type 2 cho dim_product – inserted: {inserted_count}, expired: {updated_count}, unchanged: {unchanged_rows}")
+    print(
+        f" ✅ Đã áp dụng SCD Type 2 cho dim_product – inserted: {inserted_count}, expired: {updated_count}, unchanged: {unchanged_rows}")
     return inserted_count, updated_count
 
 
@@ -781,9 +853,9 @@ def compare_staging_with_dim(target_date=None, sample_size=5):
     """
     So sánh dữ liệu mới nhất tại stg_products với dim_product (ngày cũ).
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("SO SÁNH STG_PRODUCTS ↔ DIM_PRODUCT")
-    print("="*60)
+    print("=" * 60)
     engine = create_mysql_engine()
     stg_snapshot = build_staging_snapshot(engine, target_date=target_date)
     if stg_snapshot.empty:
@@ -826,6 +898,7 @@ def sync_date_key_and_dim(rebuild_dim=True):
     if rebuild_dim:
         return load_to_dim()
     return 0, 0
+
 
 # ============================================
 # MAIN ETL PROCESS
@@ -901,6 +974,7 @@ def run_etl(simulated_date=None, stage_only=False, auto_compare=False):
             if log_id:
                 control_log_finish(log_id, status="failed", error_message=error_msg)
         raise
+
 
 # ============================================
 # ENTRY POINT
