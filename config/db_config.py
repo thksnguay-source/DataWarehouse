@@ -1,4 +1,3 @@
-
 import os
 
 def get_mysql_url() -> str:
@@ -6,7 +5,16 @@ def get_mysql_url() -> str:
     port = "3306"
     user = "root"
     password = ""
-    db = "datawarehouse"
+    db = "staging"
 
-    return f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}"
+    return f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}?charset=utf8mb4"
+
+def get_mysql_url_control() -> str:
+    host = "localhost"
+    port = "3306"
+    user = "root"
+    password = ""
+    db = "control"
+
+    return f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}?charset=utf8mb4"
 

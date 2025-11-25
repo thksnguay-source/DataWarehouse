@@ -41,3 +41,51 @@ def connect_db(db_name: Optional[str] = None):
         charset='utf8mb4',
         cursorclass=pymysql.cursors.DictCursor
     )
+
+# =========================
+# 🔹 DIMENSION MAPPINGS: DWH column → Data Mart column
+# =========================
+DIMENSION_MAPPINGS = {
+    'dim_brand': {
+        'brand_key': 'brand_key',
+        'brand_name': 'brand_name'
+    },
+
+    'date_dims': {
+        'date_sk': 'date_sk',
+        'full_date': 'full_date',
+        'day_since_2005': 'day_since_2005',
+        'month_since_2005': 'month_since_2005',
+        'day_of_week': 'day_of_week',
+        'calendar_month': 'calendar_month',
+        'calendar_year': 'calendar_year',
+        'calendar_year_month': 'calendar_year_month',
+        'day_of_month': 'day_of_month',
+        'day_of_year': 'day_of_year',
+        'week_of_year_sunday': 'week_of_year_sunday',
+        'year_week_sunday': 'year_week_sunday',
+        'week_sunday_start': 'week_sunday_start',
+        'week_of_year_monday': 'week_of_year_monday',
+        'year_week_monday': 'year_week_monday',
+        'week_monday_start': 'week_monday_start',
+        'holiday': 'holiday',
+        'day_type': 'day_type'
+    },
+
+    'dim_product': {
+        'product_id': 'product_id',
+        'ten_san_pham': 'product_name',
+        'brand_key': 'brand_key',
+        'category': 'category',
+        'sale_price_vnd': 'price',
+        'Chip': 'cpu',
+        'RAM': 'ram',
+        'ROM': 'storage',
+        'Hệ điều hành': 'os',
+        'Công nghệ màn hình': 'screen_size',
+        'Pin': 'battery',
+        'ngay_crawl': 'date_collected',
+        'date_key': 'date_key',
+        'expiry_date': 'expired_dt'
+    }
+}
