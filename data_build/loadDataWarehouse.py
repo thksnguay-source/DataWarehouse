@@ -106,7 +106,6 @@ def get_latest_staging_batch(conn_config):
         if conn_staging and conn_staging.is_connected():
             conn_staging.close()
 
-# Hàm hỗ trợ truyền tham số batch_id khi chạy thủ công
 def get_specific_staging_batch(conn_config, batch_id):
     """Kiểm tra sự tồn tại và trạng thái 'success' của một batch_id cụ thể."""
     conn_staging = None
