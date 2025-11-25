@@ -1126,228 +1126,59 @@ class ETLLogger:
         finally:
             conn.close()
 
-def main():
-    print("=" * 70)
-    print("🚀 UNIFIED MOBILE CRAWLER - FIXED VERSION")
-    print("   CellphoneS.com.vn + TheGioiDiDong.com")
-    print("=" * 70)
+def auto_crawl():
+    """Hàm chạy tự động khi script được gọi"""
+    print("=" * 80)
+    print("UNIFIED MOBILE CRAWLER - CHẾ ĐỘ TỰ ĐỘNG")
+    print("Crawl CellphoneS + TheGioiDiDong → Lưu vào ../crawed/")
+    print("=" * 80)
+    print(f"⏰ Thời gian bắt đầu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("Đang khởi tạo crawler...")
 
-    print("\n📋 MENU CHÍNH:")
-    print("  1. Crawl sản phẩm từ website")
-    print("  2. Import JSON vào MySQL")
-    print("  3. Test Driver")
-    print("  4. Thoát")
-
-    menu_choice = input("\nChọn chức năng (1-4): ").strip()
-
-    if menu_choice == '2':
-        print("\n" + "=" * 60)
-        print("JSON → MySQL IMPORTER")
-        print("=" * 60)
-        print("\n📋 Chọn cách import:")
-        print("  1. Tự động tìm tất cả file JSON (Khuyến nghị)")
-        print("  2. Nhập tên file cụ thể")
-
-        import_choice = input("\nChọn (1-2) [Enter = Tự động]: ").strip()
-
-        if import_choice == '2':
-            file_input = input("\nNhập tên file (nhiều file cách nhau bởi dấu phẩy):\n").strip()
-            if file_input:
-                files = [f.strip() for f in file_input.split(',')]
-                import_json_to_mysql(files)
-            else:
-                print("❌ Chưa nhập file nào!")
-        else:
-            # Tự động tìm và import
-            import_json_to_mysql()
-
-        return
-
-    elif menu_choice == '3':
-        print("\n" + "=" * 60)
-        print("🧪 TEST DRIVER")
-        print("=" * 60)
-        print("Khởi động driver để test...")
-
-        manager = UnifiedCrawlerManager(headless=False, use_db_config=False)
-        manager.start_driver()
-
-        print("\n✅ Driver đã khởi động!")
-        manager.driver.get("https://www.google.com")
-        time.sleep(3)
-
-        print("\nTest restart driver...")
-        manager.restart_driver()
-
-        print("✅ Restart thành công!")
-        manager.driver.get("https://www.google.com")
-        time.sleep(3)
-
-        manager.close_driver()
-        print("✅ Test hoàn tất!")
-        return
-
-    elif menu_choice == '4':
-        print("👋 Tạm biệt!")
-        return
-
-    elif menu_choice != '1':
-        print("❌ Lựa chọn không hợp lệ!")
-        return
-
-    # Crawl workflow
-    use_db = input("\n📊 Sử dụng config từ Database? (y/n) [Enter = yes]: ").strip().lower()
-    use_db_config = use_db != 'n'
-
-    if use_db_config:
-        print("✅ Sẽ load config từ Control DB")
-        try:
-            db_config = get_db_config()
-            test_loader = ConfigLoader(db_config)
-            test_loader.close()
-            print(f"✅ Kết nối DB thành công")
-        except Exception as e:
-            print(f"❌ Không thể kết nối DB: {e}")
-            print("⚠️ Sẽ dùng config hard-code")
-            use_db_config = False
-    else:
-        print("⚠️ Sẽ dùng config hard-code")
-
-    print("\n⚙️ CẤU HÌNH CRAWL:")
-    print("-" * 70)
-
-    crawler_settings = get_crawler_settings()
-    print(f"📝 Settings:")
-    print(f"   - Headless: {crawler_settings['headless']}")
-    print(f"   - Save checkpoint: {crawler_settings['save_checkpoint']}")
-
-    # Chọn nguồn
-    print("\n🌐 Chọn nguồn:")
-    print("  1. CellphoneS")
-    print("  2. TheGioiDiDong")
-    print("  3. Cả 2 nguồn")
-
-    source_choice = input("\nChọn (1-3) [Enter = Cả 2]: ").strip()
-
-    if source_choice == '1':
-        selected_sources = ['cellphones']
-    elif source_choice == '2':
-        selected_sources = ['tgdd']
-    else:
-        selected_sources = ['cellphones', 'tgdd']
-
-    # Chọn số lượng
-    print("\n📊 Số lượng sản phẩm:")
-    print("  1. Test (20)")
-    print("  2. Vừa (50)")
-    print("  3. Nhiều (100)")
-    print("  4. Tất cả")
-
-    quantity_choice = input("\nChọn (1-4) [Enter = Test]: ").strip()
-
-    if quantity_choice == '2':
-        MAX_PRODUCTS = 50
-    elif quantity_choice == '3':
-        MAX_PRODUCTS = 100
-    elif quantity_choice == '4':
-        MAX_PRODUCTS = None
-    else:
-        MAX_PRODUCTS = 20
-
-    # Restart interval
-    restart_input = input(f"\n🔄 Driver restart interval [Enter = 30]: ").strip()
-    try:
-        RESTART_INTERVAL = int(restart_input) if restart_input else 30
-    except:
-        RESTART_INTERVAL = 30
-
-    print(f"\n✔ Số sản phẩm: {MAX_PRODUCTS if MAX_PRODUCTS else 'Tất cả'}")
-    print(f"✔ Restart: Mỗi {RESTART_INTERVAL} sản phẩm")
-    print("-" * 70)
-
-    confirm = input("\n▶ Bắt đầu? (y/n) [Enter = yes]: ").strip().lower()
-    if confirm and confirm not in ['y', 'yes', '']:
-        print("❌ Đã hủy")
-        return
-
+    # Cấu hình tự động tối ưu cho Task Scheduler
     manager = UnifiedCrawlerManager(
-        headless=crawler_settings['headless'],
-        save_checkpoint=crawler_settings['save_checkpoint'],
-        use_db_config=use_db_config
+        headless=True,           # BẮT BUỘC ẩn trình duyệt
+        save_checkpoint=True,    # Luôn lưu checkpoint
+        use_db_config=True       # Ưu tiên dùng config từ DB (nếu kết nối được)
     )
 
-    manager.driver_restart_interval = RESTART_INTERVAL
+    # Tăng khoảng restart driver để ổn định hơn
+    manager.driver_restart_interval = 40
+
+    total_products = 0
+    start_time = time.time()
 
     try:
-        start_time = time.time()
         manager.start_driver()
 
+        print("\nBẮT ĐẦU CRAWL TỰ ĐỘNG 2 NGUỒN...")
         total_success = manager.crawl_all_sources(
-            sources=selected_sources,
-            max_products_per_source=MAX_PRODUCTS
+            sources=['cellphones', 'tgdd'],
+            max_products_per_source = 120  # Crawl 120 sản phẩm từng nguồn
         )
 
-        if manager.all_products:
+        total_products = len(manager.all_products)
+
+        if total_products > 0:
             manager.save_results()
+            print(f"\nHOÀN TẤT! Đã crawl {total_products} sản phẩm")
         else:
-            print("\n⚠️ Không có sản phẩm nào!")
-
-        elapsed = time.time() - start_time
-        minutes = int(elapsed // 60)
-        seconds = int(elapsed % 60)
-
-        print("\n" + "=" * 70)
-        print("✅ HOÀN THÀNH!")
-        print("=" * 70)
-        print(f"⏱️ Thời gian: {minutes}p {seconds}s")
-        print(f"📦 Sản phẩm: {len(manager.all_products)}")
-        print("=" * 70)
+            print("\nKHÔNG CRAWL ĐƯỢC SẢN PHẨM NÀO!")
 
     except KeyboardInterrupt:
-        print("\n\n⚠️ Đã dừng")
+        print("\nĐÃ DỪNG BỞI NGƯỜI DÙNG (Ctrl+C)")
     except Exception as e:
-        print(f"\n❌ Lỗi: {e}")
+        print(f"\nLỖI NGHIÊM TRỌNG: {e}")
         import traceback
         traceback.print_exc()
     finally:
         manager.close_driver()
-
-def is_running_from_task_scheduler():
-    try:
-        return "idle" in os.popen('qwinsta').read().lower() or sys.stdin.isatty() == False
-    except:
-        return len(sys.argv) > 1
+        elapsed = time.time() - start_time
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"\nThời gian thực thi: {mins} phút {secs} giây")
+        print(f"Hoàn thành lúc: {datetime.now().strftime('%H:%M:%S')}")
+        print("=" * 80)
 
 
 if __name__ == "__main__":
-    if is_running_from_task_scheduler() or len(sys.argv) > 1:
-        # CHẾ ĐỘ TỰ ĐỘNG CHO TASK SCHEDULER
-        print("Chạy tự động từ Task Scheduler")
-
-        # TẮT MENU - CHẠY ĐẦY ĐỦ 2 WEBSITE, KHÔNG GIỚI HẠN SỐ LƯỢNG
-        manager = UnifiedCrawlerManager(
-            headless=True,  # bắt buộc headless
-            save_checkpoint=True,
-            use_db_config=True  # ưu tiên dùng DB config
-        )
-        manager.driver_restart_interval = 40
-
-        try:
-            manager.start_driver()
-            total = manager.crawl_all_sources(
-                sources=['cellphones', 'tgdd'],
-                max_products_per_source=None  # crawl hết
-            )
-            if manager.all_products:
-                manager.save_results()
-            print(f"HOÀN TẤT: {len(manager.all_products)} sản phẩm")
-        except Exception as e:
-            print(f"LỖI: {e}")
-            import traceback
-
-            traceback.print_exc()
-        finally:
-            manager.close_driver()
-    else:
-        # Giữ nguyên menu tương tác khi chạy tay
-        main()
+    auto_crawl()
