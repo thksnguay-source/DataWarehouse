@@ -1,9 +1,18 @@
 import json
-from sqlalchemy import create_engine, text
-# from config.db_loadStaging import get_mysql_load_staging_url, get_mysql_control_url
-from datetime import datetime
-from transform.etl_transforms import get_mysql_url,get_control_mysql_url
+import sys
+import os # Import thư viện os để xử lý đường dẫn
 
+from sqlalchemy import create_engine, text
+from datetime import datetime
+
+
+# Cập nhật Python Path để tìm thư mục 'config' để chạy code thủ công
+# Lấy đường dẫn thư mục chứa script hiện tại (data_build)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Thêm thư mục cha (DataWarehouse) vào Python path để tìm thư mục 'config'
+project_root = os.path.join(current_dir, '..')
+sys.path.append(project_root)
+from config.db_config import get_mysql_url,get_mysql_url_control
 
 
             # các trường trong general
@@ -57,7 +66,7 @@ def insert_one(item, conn):
                 # --- ETL process chính ---
 def etl_log(file_list):
     staging_engine = create_engine(get_mysql_url())
-    control_engine = create_engine(get_control_mysql_url())
+    control_engine = create_engine(get_mysql_url_control())
 
     clear_table()
 
@@ -68,14 +77,15 @@ def etl_log(file_list):
             batch_id = f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}"
             start_time = datetime.now()
 
+
             sql_insert_log = text("""
                 INSERT INTO etl_log (
                     batch_id, process_id, source_table, target_table,
                     records_inserted, records_updated, records_skipped,
-                    status, start_time
+                    error_message,status, start_time
                 ) VALUES (
                     :batch_id, :process_id, :source_table, :target_table,
-                    0, 0, 0,
+                    0, 0, 0,NULL,
                     'RUNNING', :start_time
                 )
             """)
@@ -96,6 +106,7 @@ def etl_log(file_list):
                 records_inserted = 0
                 records_skipped = 0
                 records_updated = 0
+                error_message = None
 
                 for item in data:
                     success = insert_one(item, stg_conn)
@@ -106,11 +117,13 @@ def etl_log(file_list):
 
                 status = "SUCCESS"
 
+
             except Exception as e:
                 print(f"Lỗi khi xử lý {file}: {e}")
                 records_inserted = 0
                 records_skipped = 0
                 records_updated = 0
+                error_message = str(e)[:500]
                 status = "FAILED"
 
             # 3) UPDATE LOG KẾT THÚC
@@ -122,6 +135,7 @@ def etl_log(file_list):
                     records_inserted = :records_inserted,
                     records_updated = :records_updated,
                     records_skipped = :records_skipped,
+                    error_message = :error_message,
                     end_time = :end_time
                 WHERE etl_id = :etl_id
             """)
@@ -130,6 +144,7 @@ def etl_log(file_list):
                 "records_inserted": records_inserted,
                 "records_updated": records_updated,
                 "records_skipped": records_skipped,
+                "error_message": error_message,
                 "end_time": end_time,
                 "etl_id": etl_id
             })
@@ -138,5 +153,9 @@ def etl_log(file_list):
 
                     # --- Main ---
 if __name__ == "__main__":
-    files = ["cellphones.json", "thegioididong.json"]
+    files = [
+        os.path.join(project_root, "crawed", "cellphones.json"),
+        os.path.join(project_root, "crawed", "tgdd.json")
+    ]
+
     etl_log(files)
