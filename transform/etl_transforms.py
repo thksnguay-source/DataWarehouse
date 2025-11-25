@@ -458,6 +458,56 @@ def _ensure_control_process(conn, process_key):
     return conn.execute(text("SELECT LAST_INSERT_ID()")).scalar()
 
 
+def get_latest_general_load_status():
+    """
+    Lấy trạng thái mới nhất của bước load JSON → general.
+    """
+    engine = create_control_engine()
+    with engine.begin() as conn:
+        _ensure_control_tables(conn)
+        row = (
+            conn.execute(
+                text(
+                    """
+                    SELECT etl_id, batch_id, status, source_table, target_table, end_time
+                    FROM etl_log
+                    WHERE target_table = :target_table
+                    ORDER BY etl_id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"target_table": "general"},
+            )
+            .mappings()
+            .fetchone()
+        )
+        return dict(row) if row else None
+
+
+def ensure_general_load_success():
+    """
+    Ngăn chạy ETL nếu lần load JSON → general gần nhất thất bại.
+    """
+    latest_log = get_latest_general_load_status()
+    if not latest_log:
+        print(" ⚠️ Chưa có log load JSON → general. Tiếp tục chạy ETL.")
+        return None
+
+    status = (latest_log.get("status") or "").strip().lower()
+    if status not in {"success"}:
+        raise RuntimeError(
+            "Không thể chạy ETL vì lần load JSON → general gần nhất "
+            f"(etl_id={latest_log['etl_id']}, batch_id={latest_log['batch_id']}) "
+            f"có trạng thái '{latest_log.get('status')}'. Vui lòng xử lý lỗi trước."
+        )
+
+    print(
+        f" ✅ Log load JSON → general gần nhất (etl_id={latest_log['etl_id']}, "
+        f"batch_id={latest_log['batch_id']}) có trạng thái success."
+    )
+    return latest_log
+
+
 def control_log_start(process_key, batch_id, source_table="", target_table=""):
     """
     Ghi nhận thời điểm bắt đầu 1 process trong DB control.
@@ -911,6 +961,11 @@ def run_etl(simulated_date=None, stage_only=False, auto_compare=False):
         "load_staging": None,
         "load_dwh": None,
     }
+    try:
+        ensure_general_load_success()
+    except RuntimeError as blocker:
+        print(f"❌ Dừng ETL: {blocker}")
+        return
     try:
         # Bước 1: đọc dữ liệu từ bảng general để transform
         control_logs["transform"] = control_log_start(
