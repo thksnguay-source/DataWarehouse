@@ -50,7 +50,6 @@ DIMENSION_MAPPINGS = {
         'brand_key': 'brand_key',
         'brand_name': 'brand_name'
     },
-
     'date_dims': {
         'date_sk': 'date_sk',
         'full_date': 'full_date',
@@ -71,7 +70,6 @@ DIMENSION_MAPPINGS = {
         'holiday': 'holiday',
         'day_type': 'day_type'
     },
-
     'dim_product': {
         'product_id': 'product_id',
         'ten_san_pham': 'product_name',

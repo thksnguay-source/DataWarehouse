@@ -28,6 +28,7 @@ def execute_log_query(sql, data=None):
         if conn:
             conn.close()
 
+### 4. Viết Log Start ETL
 def log_start(batch_id, source_table, target_table):
     sql = """
         INSERT INTO etl_log (batch_id, process_id, source_table, target_table, status, start_time)
@@ -37,6 +38,7 @@ def log_start(batch_id, source_table, target_table):
     print(f"✅ Log START: etl_id={etl_id}, batch_id={batch_id}")
     return etl_id
 
+### 9. 10. Ghi log success/failed
 def log_end(etl_id, status, inserted=0, updated=0, error_message=''):
     sql = """
         UPDATE etl_log
@@ -51,6 +53,7 @@ def log_end(etl_id, status, inserted=0, updated=0, error_message=''):
     execute_log_query(sql, (status, inserted, updated, error_message, etl_id))
     print(f"✅ Log END: etl_id={etl_id}, status={status}")
 
+### 11. Xóa log start
 def log_delete_started(etl_id):
     sql = "DELETE FROM etl_log WHERE etl_id=%s AND status='started' AND end_time IS NULL"
     execute_log_query(sql, (etl_id,))
@@ -80,7 +83,7 @@ def get_last_success_end_time(process_id: int):
 def get_last_dwh_success_time():
     return get_last_success_end_time(4)
 
-
+### 1. Kiểm tra có dữ liệu mới từ LoadDataWarehouse.
 def should_run_process_5() -> bool:
     end_time_4 = get_last_success_end_time(4)
     end_time_5 = get_last_success_end_time(5)
@@ -101,6 +104,7 @@ def should_run_process_5() -> bool:
     print("✅ DWH Load mới hơn Data Mart (P4 > P5 hoặc P5 chưa chạy). Bắt đầu ETL P5.")
     return True
 
+### 3. Kiểm tra dữ liệu dimension có thay đổi sau khi loadDatawarehouse?
 def check_dwh_table_update(dwh_table_name: str, batch_id: str) -> bool:
     conn = connect_db(CONFIG["CONTROL_DB"])
     try:
@@ -121,6 +125,7 @@ def check_dwh_table_update(dwh_table_name: str, batch_id: str) -> bool:
 # =========================
 # 🔹 EXTRACT DIMENSION
 # =========================
+### 7. Transform cột price.
 def clean_price(price_str):
     if not price_str:
         return 0.0
@@ -130,13 +135,13 @@ def clean_price(price_str):
         return float(clean)
     except ValueError:
         return 0.0
+### 5. Extract dữ liệu từ DWH
 def extract_dimension_from_dwh(dim_name: str, batch_id: str):
     conn = connect_db(CONFIG["DWH_DB_NAME"])
     last_success_time_p4 = get_last_dwh_success_time()
     columns = DIMENSION_MAPPINGS.get(dim_name)
     if not columns:
         raise KeyError(f"Không có mapping cho {dim_name}")
-
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cur:
             if dim_name == 'dim_product':
@@ -166,7 +171,7 @@ def extract_dimension_from_dwh(dim_name: str, batch_id: str):
         conn.close()
 
 # =========================
-# 🔹 LOAD DIMENSION
+# 🔹8. Load dữ liệu vào Datamart.
 # =========================
 def load_dimension_to_datamart(df: pd.DataFrame, table_name: str, pk_cols: list):
     inserted, updated = 0, 0
@@ -196,19 +201,32 @@ def load_dimension_to_datamart(df: pd.DataFrame, table_name: str, pk_cols: list)
 # =========================
 # 🔹 RUN ETL
 # =========================
-def run_etl():
-    if not should_run_process_5():
-        print("❌ Điều kiện ETL không thỏa mãn. Dừng P5.")
-        return
+def run_etl(manual_batch_id=None):
+    if manual_batch_id:
+        print("⚠️ Bỏ qua kiểm tra điều kiện P4 > P5 vì đang chạy batch_id thủ công.")
+    else:
+        if not should_run_process_5():
+            print("❌ Điều kiện ETL không thỏa mãn. Dừng P5.")
+            return
 
     last_dwh_log = get_last_success_log(4)
     if not last_dwh_log:
         print("⚠️ Không tìm thấy log DWH thành công. Dừng ETL.")
         return
 
-    batch_id = last_dwh_log['batch_id']
-    print(f"📌 Batch ID: {batch_id}")
+    if manual_batch_id:
+        batch_id = manual_batch_id
+        print(f"📌 Sử dụng batch_id thủ công: {batch_id}")
+    else:
+    # Nếu không truyền -> lấy batch_id mới nhất
+        last_dwh_log = get_last_success_log(4)
+        if not last_dwh_log:
+            print("⚠️ Không tìm thấy log DWH thành công. Dừng ETL.")
+            return
+        batch_id = last_dwh_log['batch_id']
+        print(f"📌 Batch ID tự động: {batch_id}")
 
+    ### 2. Duyệt danh sách Dimension: dim_brand, date_dims, dim_product
     REQUIRED_ORDER = [
         ('dim_brand','dim_brand',['brand_key']),
         ('date_dims','date_dims',['date_sk']),
@@ -225,6 +243,8 @@ def run_etl():
         inserted, updated = 0,0
         try:
             df = extract_dimension_from_dwh(dim_name, batch_id)
+
+            ### 6. Kiểm tra có phải bảng dim_product.
             if not df.empty and dim_name == 'dim_product':
                 df['price'] = df['price'].apply(clean_price)
             if not df.empty:
@@ -245,8 +265,19 @@ def run_etl():
 # =========================
 if __name__ == "__main__":
     print("🚀 BẮT ĐẦU QUY TRÌNH ETL DATA MART")
+
+    batch_id_arg = None
+
+    if len(sys.argv) > 1:
+        batch_id_arg = sys.argv[1]
+        print(f"📌 Batch ID thủ công: {batch_id_arg}")
+    # else:
+    #     batch = input("👉 Nhập batch_id (Enter để chạy batch mới nhất): ").strip()
+    #     if batch:
+    #         batch_id_arg = batch
+
     try:
-        run_etl()
+        run_etl(batch_id_arg)
     except Exception as e:
         print(f"\n🛑 Lỗi toàn cục ETL: {e}")
         sys.exit(1)
