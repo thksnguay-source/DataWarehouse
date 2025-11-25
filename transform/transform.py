@@ -20,7 +20,7 @@ from config.db_config import get_mysql_url, get_mysql_url_control
 # ============================================
 # MYSQL CONNECTION
 # ============================================
-MYSQL_DB = "staging"  # Giữ đúng tên schema đang sử dụng trong MySQL
+MYSQL_DB = "stagings"  # Giữ đúng tên schema đang sử dụng trong MySQL
 CONTROL_DB = "control"  # Database phục vụ ghi log quy trình
 
 
@@ -155,7 +155,7 @@ def ensure_dim_product_structure(conn, columns_info):
     WORKFLOW STEP 21: ENSURE DIM_PRODUCT STRUCTURE
     Đảm bảo bảng dim_product tồn tại với đầy đủ cột theo schema của stg_products
     - Bước 21.1: Loại bỏ cột cũ: 'Tên sản phẩm', 'Giá', 'Nguồn'
-    - Bước 21.2: Xây dựng column definitions từ columns_info    
+    - Bước 21.2: Xây dựng column definitions từ columns_info
     - Bước 21.3: CREATE TABLE IF NOT EXISTS dim_product
     - Bước 21.4: Kiểm tra cột hiện có
     - Bước 21.5: DROP cột cũ nếu tồn tại
@@ -750,6 +750,14 @@ def transform_data(df, simulated_date=None):
     df['category'] = df['ten_san_pham'].apply(categorize)  # WORKFLOW STEP 7: Áp dụng categorize
 
     """
+    WORKFLOW STEP 7.1: THÊM METADATA NGÀY CRAWL + DATE_KEY
+    - ngay_crawl: DATETIME thời điểm crawl (hoặc ngày giả lập simulated_date)
+    - date_key : khóa ngày ở dạng chuỗi YYYYMMDD (sẽ được map sang date_dims.date_sk ở bước sau)
+    """
+    df['ngay_crawl'] = crawl_dt
+    df['date_key'] = crawl_dt.strftime("%Y%m%d")
+
+    """
     WORKFLOW STEP 8: XỬ LÝ NGUỒN
     - fillna('CellphoneS'): Mặc định nguồn là 'CellphoneS' nếu NULL
     - Chuyển sang string và strip()
@@ -768,14 +776,15 @@ def transform_data(df, simulated_date=None):
 
     """
     WORKFLOW STEP 10: CHUẨN HÓA KIỂU DỮ LIỆU
-    - Tất cả cột (trừ brand, category) → chuyển sang string
+    - Tất cả cột (trừ brand, category, ngay_crawl, date_key) → chuyển sang string
     - Thay thế 'nan', 'None', 'NaT', '<NA>' → None (NULL trong SQL)
     - Xử lý giá trị rỗng → None
     - Loại bỏ cột không cần thiết: id, created_at
     """
     # Xử lý tất cả các cột text - chuyển sang string và xử lý NULL
     for col in df.columns:
-        if col not in ['brand', 'category']:
+        # Giữ nguyên kiểu cho các cột metadata ngày để còn dùng map sang date_dims
+        if col not in ['brand', 'category', 'ngay_crawl', 'date_key']:
             df[col] = df[col].astype(str)  # WORKFLOW STEP 10: Chuyển sang string
             df[col] = df[col].replace(['nan', 'None', 'NaT', '<NA>'], None)  # WORKFLOW STEP 10: Thay nan → None
             # Xử lý các giá trị rỗng
@@ -825,6 +834,10 @@ def load_to_staging(df):
         """
         df_to_load = df.copy()  # WORKFLOW STEP 14.1: Sao chép DataFrame
 
+        # Đảm bảo ngay_crawl là datetime object để pandas tự động detect
+        if 'ngay_crawl' in df_to_load.columns:
+            df_to_load['ngay_crawl'] = pd.to_datetime(df_to_load['ngay_crawl'], errors='coerce')
+
         """
         WORKFLOW STEP 14.2: PANDAS TO_SQL()
         - Load vào bảng stg_products
@@ -849,6 +862,7 @@ def load_to_staging(df):
                 'nguon': 'VARCHAR(100)',
                 'brand': 'VARCHAR(50)',
                 'category': 'VARCHAR(50)',
+                'date_key': 'VARCHAR(8)',
                 'ten_san_pham': 'VARCHAR(255)',
                 'Công nghệ NFC': 'VARCHAR(10)',
                 'Hỗ trợ mạng': 'VARCHAR(10)',
@@ -875,6 +889,17 @@ def load_to_staging(df):
                     print("   ✓ sale_price_vnd -> DECIMAL(15,2)")
                 except Exception as e:
                     print(f"   ⚠️  Không thể chuyển sale_price_vnd sang DECIMAL: {e}")
+
+            # Cập nhật ngay_crawl thành DATETIME nếu có
+            if 'ngay_crawl' in df.columns:
+                try:
+                    conn.execute(text("""
+                                      ALTER TABLE stg_products
+                                          MODIFY COLUMN ngay_crawl DATETIME NULL
+                                      """))
+                    print("   ✓ ngay_crawl -> DATETIME")
+                except Exception as e:
+                    print(f"   ⚠️  Không thể chuyển ngay_crawl sang DATETIME: {e}")
 
             # WORKFLOW STEP 15.2: Cập nhật các cột VARCHAR
             for col, dtype in varchar_updates.items():
@@ -1192,12 +1217,65 @@ def compare_staging_with_dim(target_date=None, sample_size=5):
 def sync_date_key_and_dim(rebuild_dim=True):
     """
     WORKFLOW STEP 19: SYNC DATE KEY AND DIM
-    Đơn giản hóa: chỉ load vào dim_product, không còn sync date_key nữa.
+    Đồng bộ cột date_key trong stg_products với bảng date_dims như trong script test:
+    - Kiểm tra stg_products có dữ liệu
+    - Kiểm tra date_dims có dữ liệu
+    - Đảm bảo cột ngay_crawl tồn tại
+    - UPDATE stg_products.date_key = date_dims.date_sk (JOIN theo DATE(ngay_crawl) = DATE(full_date))
     - Nếu rebuild_dim = True → gọi load_to_dim()
-    - Nếu rebuild_dim = False → return 0, 0
     """
+    engine = create_mysql_engine()
+
+    with engine.begin() as conn:
+        # Kiểm tra stg_products có dữ liệu không
+        stg_count = conn.execute(text("SELECT COUNT(*) FROM stg_products")).scalar()
+        if stg_count == 0:
+            print(" ⚠️ stg_products đang trống, bỏ qua đồng bộ date_key.")
+            return 0, 0
+
+        # Kiểm tra date_dims có dữ liệu không
+        date_count = conn.execute(text("SELECT COUNT(*) FROM date_dims")).scalar()
+        if date_count == 0:
+            raise ValueError("Bảng date_dims không có dữ liệu, không thể map date_key.")
+
+        # Kiểm tra cột ngay_crawl tồn tại trong stg_products
+        has_ngay = conn.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = :schema
+                  AND TABLE_NAME = 'stg_products'
+                  AND COLUMN_NAME = 'ngay_crawl'
+            """),
+            {"schema": MYSQL_DB},
+        ).scalar()
+
+        if has_ngay == 0:
+            raise KeyError("Không tìm thấy cột 'ngay_crawl' trong stg_products.")
+
+        # Cập nhật date_key dựa trên date_dims
+        conn.execute(text("""
+            UPDATE stg_products s
+            LEFT JOIN date_dims d ON DATE(s.ngay_crawl) = DATE(d.full_date)
+            SET s.date_key = d.date_sk
+        """))
+
+        missing = conn.execute(text("""
+            SELECT COUNT(*)
+            FROM stg_products s
+            LEFT JOIN date_dims d ON DATE(s.ngay_crawl) = DATE(d.full_date)
+            WHERE d.date_sk IS NULL
+        """)).scalar()
+
+    if missing:
+        print(f" ⚠️ Có {missing} dòng chưa match được date_key trong date_dims.")
+    else:
+        print(" ✅ date_key trong stg_products đã đồng bộ với date_dims.")
+
     if rebuild_dim:
-        return load_to_dim()  # WORKFLOW STEP 19: Gọi load_to_dim() → thực hiện STEP 20-33
+        print(" 🔄 Đang rebuild dim_product sau khi cập nhật date_key...")
+        return load_to_dim()
+
     return 0, 0
 
 
