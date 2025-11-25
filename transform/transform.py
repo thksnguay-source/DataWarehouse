@@ -155,7 +155,7 @@ def ensure_dim_product_structure(conn, columns_info):
     WORKFLOW STEP 21: ENSURE DIM_PRODUCT STRUCTURE
     Đảm bảo bảng dim_product tồn tại với đầy đủ cột theo schema của stg_products
     - Bước 21.1: Loại bỏ cột cũ: 'Tên sản phẩm', 'Giá', 'Nguồn'
-    - Bước 21.2: Xây dựng column definitions từ columns_info
+    - Bước 21.2: Xây dựng column definitions từ columns_info    
     - Bước 21.3: CREATE TABLE IF NOT EXISTS dim_product
     - Bước 21.4: Kiểm tra cột hiện có
     - Bước 21.5: DROP cột cũ nếu tồn tại
