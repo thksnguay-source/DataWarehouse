@@ -14,7 +14,7 @@ DB_CONFIG = {
 # Tên các database
 DB_DATAWH = 'datawh'
 DB_STAGING = 'staging'
-DB_CONTROL = 'crawl_controller'
+DB_CONTROL = 'control'
 
 # Cấu hình các Dimension: Key là Surrogate Key (SK) mới
 # (Tên DIM, DB Nguồn (Staging), Surrogate Key (SK))

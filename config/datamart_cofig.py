@@ -18,7 +18,7 @@ CONFIG: Dict[str, Any] = {
     # DB Names
     "DWH_DB_NAME": "datawh",
     "DATA_MART_DB": "data_mart_prod",
-    "CONTROL_DB": "crawl_controller",
+    "CONTROL_DB": "control",
 
     # Bảng nguồn
     "SOURCE_TABLE": "dim_product"

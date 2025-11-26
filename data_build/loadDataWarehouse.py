@@ -3,11 +3,20 @@ import mysql.connector
 from datetime import datetime
 import sys
 
+import os # Import thư viện os để xử lý đường dẫn
+
+# Cập nhật Python Path để tìm thư mục 'config' để chạy code thủ công
+# Lấy đường dẫn thư mục chứa script hiện tại (data_build)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Thêm thư mục cha (DataWarehouse) vào Python path để tìm thư mục 'config'
+project_root = os.path.join(current_dir, '..')
+sys.path.append(project_root)
+
 # Import các thành phần cần thiết để subclass CMySQLCursor
 try:
     from mysql.connector.cursor_cext import CMySQLCursor
 except ImportError:
-    # Dự phòng nếu C extension không có sẵn
+    # Dự phòng nếu C extension không có sẵncd D:\DataWH\DataWarehousecd D:\DataWH\DataWarehouse
     from mysql.connector.cursor import MySQLCursor as CMySQLCursor
 
 # Import cấu hình từ file dtwh_config
@@ -19,7 +28,7 @@ except ImportError:
 
 # Process ID cho LoadDataWarehouse (Process hiện tại đang ghi log)
 PROCESS_ID_DATAWH = 4
-# Process ID cho Load_Staging (để tìm batch_id mới nhất)
+# Process ID cho Transform (để tìm batch_id mới nhất)
 PROCESS_ID_STAGING = 3
 
 # LỚP CURSOR: Hỗ trợ next_result()
@@ -88,6 +97,45 @@ def get_latest_staging_batch(conn_config):
         # 1.3.2 LỖI: Không có Batch
         else:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] KHÔNG tìm thấy batch Staging nào.")
+            return None
+
+    except mysql.connector.Error as err:
+        print(f"LỖI KHI CHECK LOG STAGING: {err}")
+        return None
+    finally:
+        if conn_staging and conn_staging.is_connected():
+            conn_staging.close()
+
+def get_specific_staging_batch(conn_config, batch_id):
+    """Kiểm tra sự tồn tại và trạng thái 'success' của một batch_id cụ thể."""
+    conn_staging = None
+    try:
+        conn_staging = mysql.connector.connect(**conn_config, database=DB_CONTROL)
+        cursor = conn_staging.cursor()
+
+        sql_check = f"""
+            SELECT batch_id, status, start_time
+            FROM etl_log
+            WHERE process_id = {PROCESS_ID_STAGING} AND batch_id = %s
+            LIMIT 1
+        """
+        cursor.execute(sql_check, (batch_id,))
+        result = cursor.fetchone()
+        cursor.close()
+
+        if result:
+            _batch_id, status, start_time = result
+            print(
+                f"[{datetime.now().strftime('%H:%M:%S')}] Kiểm tra Batch Staging: **{_batch_id}** (Trạng thái: {status}, Thời gian: {start_time})")
+
+            if status.lower() == 'success':
+                return _batch_id
+            else:
+                print(
+                    f"[{datetime.now().strftime('%H:%M:%S')}] LỖI: Batch Staging **{_batch_id}** có trạng thái **{status}**. Vui lòng kiểm tra log.")
+                return None
+        else:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] KHÔNG tìm thấy batch Staging với ID: **{batch_id}**.")
             return None
 
     except mysql.connector.Error as err:
@@ -235,11 +283,18 @@ def run_etl_dimension(conn_datawh, dim_name, source_db, pk_column, batch_id, db_
             except:
                 pass
 
-def main_etl_process():
+def main_etl_process(custom_batch_id=None):
     """
     Function chính để chạy toàn bộ quá trình ETL cho các Dimension.
+    Có thể nhận custom_batch_id để chạy lại ngày cụ thể.
     """
-    staging_batch_id = get_latest_staging_batch(DB_CONFIG)
+    if custom_batch_id:
+        print(f"\n--- ĐANG CHẠY CHẾ ĐỘ THỦ CÔNG - SỬ DỤNG BATCH ID CỤ THỂ: {custom_batch_id} ---")
+        staging_batch_id = get_specific_staging_batch(DB_CONFIG, custom_batch_id)
+    else:
+        print(f"\n--- ĐANG CHẠY CHẾ ĐỘ TỰ ĐỘNG - TÌM BATCH ID MỚI NHẤT ---")
+        staging_batch_id = get_latest_staging_batch(DB_CONFIG)
+
     # Không tìm thấy batch_id
     if not staging_batch_id:
         print("\nKHÔNG THỂ TIẾN HÀNH ETL DATA WAREHOUSE. KẾT THÚC QUÁ TRÌNH.")
@@ -263,5 +318,11 @@ def main_etl_process():
             print("\n--- KẾT THÚC QUÁ TRÌNH ETL ---")
 
 if __name__ == "__main__":
-    main_etl_process()
-
+    # Đọc đối số từ dòng lệnh (sys.argv[1] là đối số đầu tiên)
+    if len(sys.argv) > 1:
+        # Nếu có đối số, truyền nó như là custom_batch_id
+        batch_id_arg = sys.argv[1]
+        main_etl_process(batch_id_arg)
+    else:
+        # Nếu không có đối số, chạy ở chế độ tự động (lấy batch mới nhất)
+        main_etl_process()
