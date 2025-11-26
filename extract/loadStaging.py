@@ -5,7 +5,6 @@ from datetime import datetime
 from transform.etl_transforms import get_mysql_url,get_control_mysql_url
 
 
-
             # các trường trong general
 field_map = {
     "Tên sản phẩm": "Tên sản phẩm",
