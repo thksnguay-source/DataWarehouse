@@ -720,13 +720,14 @@ class UnifiedCrawlerManager:
         options.add_argument("--allow-running-insecure-content")
         options.add_argument("--no-first-run")
         options.add_argument("--no-default-browser-check")
-        options.add_argument("--disable-features=VizDisplayCompositor")
+        # options.add_argument("--disable-features=VizDisplayCompositor")
         options.add_argument("--window-size=1920,1080")
-        options.add_argument("--remote-debugging-port=9222")
+        # options.add_argument("--remote-debugging-port=9222")
         options.add_argument(f"--user-agent={self.user_agent}")
 
         if self.headless:
-            options.add_argument("--headless=new")
+            options.add_argument("--headless")
+            options.add_argument("--disable-gpu")
             print("  ℹ️ Chạy headless mode")
         else:
             print("  ℹ️ Chạy không headless")
@@ -932,51 +933,12 @@ class UnifiedCrawlerManager:
 
         return total_success
 
-    # def save_results(self):
-    #     """Lưu kết quả với format: <nguon>_<YYYYMMDD>_<HHMMSS>.json"""
-    #     now = datetime.now()
-    #     date_str = now.strftime("%Y%m%d")
-    #     time_str = now.strftime("%H%M%S")
-    #
-    #     # Phân loại sản phẩm theo nguồn
-    #     products_by_source = {}
-    #     for product in self.all_products:
-    #         source = product.get('Nguồn', 'Unknown')
-    #         if source not in products_by_source:
-    #             products_by_source[source] = []
-    #         products_by_source[source].append(product)
-    #
-    #     saved_files = []
-    #     for source, products in products_by_source.items():
-    #         # Chuẩn hóa tên nguồn
-    #         source_clean = source.lower().replace(" ", "")
-    #         if 'cellphones' in source_clean:
-    #             source_name = "cellphones"
-    #         elif 'thegioididong' in source_clean:
-    #             source_name = "thegioididong"
-    #         else:
-    #             source_name = source_clean
-    #
-    #         # Format mới: <nguon>_<YYYYMMDD>_<HHMMSS>.json
-    #         filename = f"{source_name}_{date_str}_{time_str}.json"
-    #
-    #         with open(filename, 'w', encoding='utf-8') as f:
-    #             json.dump(products, f, ensure_ascii=False, indent=2)
-    #
-    #         saved_files.append((filename, len(products)))
-    #         print(f"✅ Saved: {filename} ({len(products)} sản phẩm)")
-    #
-    #     print("\n📁 File đã lưu:")
-    #     print("-" * 70)
-    #     for filename, count in saved_files:
-    #         print(f"  {filename:45s} {count:4d} sản phẩm")
-    #
-    #     if os.path.exists(self.checkpoint_file):
-    #         os.remove(self.checkpoint_file)
-    #         print("\n✔ Đã xóa checkpoint file")
-
     def save_results(self):
-        """Lưu kết quả với format: cellphones.json và tgdd.json"""
+        """Lưu kết quả với format: <nguon>_<YYYYMMDD>_<HHMMSS>.json"""
+        now = datetime.now()
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
+
         # Phân loại sản phẩm theo nguồn
         products_by_source = {}
         for product in self.all_products:
@@ -990,13 +952,15 @@ class UnifiedCrawlerManager:
             # Chuẩn hóa tên nguồn
             source_clean = source.lower().replace(" ", "")
             if 'cellphones' in source_clean:
-                filename = "../crawed/cellphones.json"
+                source_name = "cellphones"
             elif 'thegioididong' in source_clean:
-                filename = "../crawed/tgdd.json"
+                source_name = "thegioididong"
             else:
-                filename = f"{source_clean}.json"
+                source_name = source_clean
 
-            # Lưu file JSON
+            # Format mới: <nguon>_<YYYYMMDD>_<HHMMSS>.json
+            filename = f"../crawed/{source_name}_{date_str}{time_str}.json"
+
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(products, f, ensure_ascii=False, indent=2)
 
@@ -1011,6 +975,43 @@ class UnifiedCrawlerManager:
         if os.path.exists(self.checkpoint_file):
             os.remove(self.checkpoint_file)
             print("\n✔ Đã xóa checkpoint file")
+
+    # def save_results(self):
+    #     """Lưu kết quả với format: cellphones.json và tgdd.json"""
+    #     # Phân loại sản phẩm theo nguồn
+    #     products_by_source = {}
+    #     for product in self.all_products:
+    #         source = product.get('Nguồn', 'Unknown')
+    #         if source not in products_by_source:
+    #             products_by_source[source] = []
+    #         products_by_source[source].append(product)
+    #
+    #     saved_files = []
+    #     for source, products in products_by_source.items():
+    #         # Chuẩn hóa tên nguồn
+    #         source_clean = source.lower().replace(" ", "")
+    #         if 'cellphones' in source_clean:
+    #             filename = "../crawed/cellphones.json"
+    #         elif 'thegioididong' in source_clean:
+    #             filename = "../crawed/tgdd.json"
+    #         else:
+    #             filename = f"{source_clean}.json"
+    #
+    #         # Lưu file JSON
+    #         with open(filename, 'w', encoding='utf-8') as f:
+    #             json.dump(products, f, ensure_ascii=False, indent=2)
+    #
+    #         saved_files.append((filename, len(products)))
+    #         print(f"✅ Saved: {filename} ({len(products)} sản phẩm)")
+    #
+    #     print("\n📁 File đã lưu:")
+    #     print("-" * 70)
+    #     for filename, count in saved_files:
+    #         print(f"  {filename:45s} {count:4d} sản phẩm")
+    #
+    #     if os.path.exists(self.checkpoint_file):
+    #         os.remove(self.checkpoint_file)
+    #         print("\n✔ Đã xóa checkpoint file")
 
 
 class ETLLogger:
@@ -1036,16 +1037,21 @@ class ETLLogger:
     def start_batch(self, source_name: str) -> int:
         conn = self._get_connection()
         try:
+            # Tạo batch_id theo format mong muốn
+            batch_id = f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "INSERT INTO etl_log (source_table, batch_id, status) VALUES (%s, UUID(), 'started')",
-                    (source_name,)
+                    "INSERT INTO etl_log (source_table, batch_id, status) VALUES (%s, %s, 'started')",
+                    (source_name, batch_id)
                 )
-                cursor.execute("SELECT LAST_INSERT_ID() AS id")
-                result = cursor.fetchone()
-                self.batch_id = result['id']
+
                 conn.commit()
-                print(f"Bắt đầu batch_id: {self.batch_id} | source: {source_name}")
+
+                # Lưu vào class để dùng tiếp
+                self.batch_id = batch_id
+
+                print(f"Bắt đầu batch: {self.batch_id} | source: {source_name}")
                 return self.batch_id
         finally:
             conn.close()
